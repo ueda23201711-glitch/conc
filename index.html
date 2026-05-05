@@ -192,7 +192,7 @@ const SYSTEM_INSTRUCTION =
   '・お祭り・イベント・ニュース・最新情報・現在の営業状況・今年の日程など、時事性のある最新情報が必要な質問→ search_web を呼び出す。歴史・文化・人物・地理・言語・科学など自分が知っている一般知識・歴史的事実はツールを使わず直接答えること（例：築城時期・創業年・歴史的出来事など）。' +
   '【回答ルール】' +
   'ルート案内の結果が得られたら、「○○から●●のルートをGoogleマップでご案内します。リンクからご確認ください。」と一言だけ伝えること。具体的な路線名・出発時刻・到着時刻・所要時間・乗り換え情報などは一切読み上げないこと（Googleマップリンクが自動表示されるため）。' +
-  'お店・スポットの検索結果が得られたら、1件目について「名前・評価・住所（区・市まで）・営業状況」に加えて、そのスポットやお店の特徴・見どころ・おすすめポイント・雰囲気・歴史的背景など合計5〜6文で具体的に紹介すること。「詳細はリンクをご確認ください」「詳しくはリンクから」などのリンク誘導フレーズは一切言わないこと（リンクは自動表示されるため）。' +
+  'お店・スポットの検索結果が得られたら、上位3件について名前・評価・住所・営業状況と特徴・見どころを2〜3文ずつ紹介すること。各店舗のGoogle マップリンクは自動で表示されるため「詳細はリンクをご確認ください」などのリンク誘導フレーズは言わないこと。リンクが出せないとは絶対に言わないこと（システムが自動表示するため）。ユーザーが特定のお店のリンクを求めた場合は get_places ツールでそのお店名を検索し直すこと。' +
   '会話の最初（最初のユーザー発話が空または短い場合）は「本日はいかがなさいましたか？」とだけ言ってください。この挨拶では絶対にツールを呼ばないこと。他の文・情報・提案を一切付け加えないこと。';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -231,6 +231,7 @@ let pendingLinks  = [];     // ターン完了後に表示するリンクキュ�
 let lastUserQuery = '';     // 最後のユーザー発話テキスト（ツール未使用時のGoogle検索用）
 let googleLinkScheduled = false; // Google検索リンクの重複追加防止フラグ
 let greetingComplete  = false;   // 挨拶ターン完了後フラグ（最初のturnComplete後にtrue）
+let userSpokeInTurn   = false;   // そのターンで本物のinputTranscriptionを受信したか
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  API キー (localStorage)
@@ -632,8 +633,9 @@ async function fetchPlaces(query) {
   const places = data.places || [];
   if (!places.length) return `「${query}」に該当するお店・場所が見つかりませんでした。`;
 
-  // Geminiへ渡すテキスト（簡潔に）
-  return places.slice(0, 5).map((p, i) => {
+  // Geminiへ渡すテキスト＋個別マップURIを返す
+  const top = places.slice(0, 5);
+  const text = top.map((p, i) => {
     const name   = p.displayName?.text || '不明';
     const addr   = (p.formattedAddress || '').replace('日本、', '');
     const rating = p.rating ? `★${p.rating}` : '';
@@ -641,6 +643,11 @@ async function fetchPlaces(query) {
                    p.regularOpeningHours?.openNow === false ? '営業時間外' : '';
     return `${i+1}. ${name} ${rating} ${open} ${addr}`.trim();
   }).join('\n');
+  const placeLinks = top.slice(0, 3).map(p => ({
+    name:    p.displayName?.text || '不明',
+    mapsUri: p.googleMapsUri || null
+  })).filter(p => p.mapsUri);
+  return { text, placeLinks };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1111,6 +1118,7 @@ function uint8ToBase64(u8) {
 }
 
 function flushMicChunks() {
+  if (aiTalking) { micBuffer = []; return; }  // AI発話中はバッファを捨てて送らない
   if (!ws || ws.readyState !== WebSocket.OPEN || micBuffer.length === 0) return;
   const total = micBuffer.reduce((s, c) => s + c.length, 0);
   const merged = new Int16Array(total);
@@ -1470,6 +1478,7 @@ async function handleServerMsg(msg) {
             part.inlineData.mimeType.startsWith('audio/pcm')) {
           if (!aiTalking) {
             aiTalking = true;
+            micBuffer = [];  // AIが喋り始める瞬間のバッファを破棄（エコー防止）
             const b = ensureAiBubble();
             // テキスト転写がまだ届いていない場合だけ🔊インジケーターをセット
             if (b.dataset.state === 'empty') {
@@ -1501,6 +1510,7 @@ async function handleServerMsg(msg) {
         if (!pendingUserBubble) pendingUserBubble = appendBubble('', 'user');
         pendingUserBubble.textContent += t;
         lastUserQuery += t;  // ターン内のユーザー発話を蓄積
+        userSpokeInTurn = true;  // このターンでユーザーが実際に発話した
         scrollBottom();
       }
     }
@@ -1545,14 +1555,21 @@ async function handleServerMsg(msg) {
       pendingUserBubble = null;
       // ツールが呼ばれなかった場合: 500ms後にユーザーテキストを取得してGoogle検索リンクを追加
       // （inputTranscription が turnComplete より遅れて届くことがあるため遅延実行）
-      if (!_toolWasCalled && _isGreetedNow && !googleLinkScheduled) {
+      if (!_toolWasCalled && _isGreetedNow && !googleLinkScheduled && userSpokeInTurn) {
         googleLinkScheduled = true;  // 重複スケジュール防止
         setTimeout(() => {
           // DOMの最後のユーザーバブルから直接テキストを取得（最も確実）
           const _allUserBubbles = chatEl.querySelectorAll('.row.user .bubble');
           const _lastUserBubble = _allUserBubbles.length > 0 ? _allUserBubbles[_allUserBubbles.length - 1] : null;
           const _uq = (_lastUserBubble ? _lastUserBubble.textContent.trim() : '') || lastUserQuery.trim();
-          if (_uq.length > 2) {
+
+          // AIが質問（フォローアップ）で返した場合はGoogle検索リンクを出さない
+          const _allAiBubbles = chatEl.querySelectorAll('.row.assistant .bubble');
+          const _lastAiBubble = _allAiBubbles.length > 0 ? _allAiBubbles[_allAiBubbles.length - 1] : null;
+          const _aiText = _lastAiBubble ? _lastAiBubble.textContent.trim() : '';
+          const _aiAskedQuestion = /[？?]/.test(_aiText);  // AIが質問で返した
+
+          if (_uq.length > 2 && !_aiAskedQuestion) {
             const gUrl = `https://www.google.com/search?q=${encodeURIComponent(_uq)}&hl=ja`;
             appendBubbleWithLinks([{ text: `🔎 「${_uq}」をGoogleで検索する`, url: gUrl, embedUrl: null }], 'system');
           }
@@ -1562,8 +1579,9 @@ async function handleServerMsg(msg) {
       } else {
         lastUserQuery = '';
       }
+      userSpokeInTurn = false;  // 次ターン用にリセット
       const waitMs = Math.max(300, (nextPlayAt - (playCtx ? playCtx.currentTime : 0)) * 1000 + 500);
-      setTimeout(() => { aiTalking = false; }, waitMs);
+      setTimeout(() => { micBuffer = []; aiTalking = false; }, waitMs);  // 再生完了後にバッファも捨てる
       setListening(true);
     }
 
@@ -1640,27 +1658,44 @@ async function handleServerMsg(msg) {
         } else if (call.name === 'get_places') {
           const pQuery = call.args?.query || '';
           appendBubble(`🔍 「${pQuery}」を検索中…`, 'system');
-          let placesRaw = '';
-          try { placesRaw = await fetchPlaces(pQuery); } catch(e) { placesRaw = ''; }
-          console.info('[places]', placesRaw);
+          let placesResult = null;
+          try { placesResult = await fetchPlaces(pQuery); } catch(e) { placesResult = null; }
+          console.info('[places]', placesResult);
 
-          // Places API の成否にかかわらず常に Google マップリンクを表示
-          pendingLinks.push({
-            text: '📍 Google マップで詳細を見る',
-            url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pQuery)}`,
-            embedUrl: null
-          });
+          const placesText = placesResult?.text || '';
+          const placeLinks = placesResult?.placeLinks || [];
 
-          const placesOk = placesRaw
-            && !placesRaw.includes('エラー')
-            && !placesRaw.includes('未設定')
-            && !placesRaw.includes('見つかりません')
-            && !placesRaw.includes('失敗');
+          const placesOk = placesText
+            && !placesText.includes('エラー')
+            && !placesText.includes('未設定')
+            && !placesText.includes('見つかりません')
+            && !placesText.includes('失敗');
 
-          if (placesOk) {
-            output = placesRaw;
+          if (placesOk && placeLinks.length > 0) {
+            // 個別店舗リンクを表示
+            placeLinks.forEach(p => {
+              pendingLinks.push({
+                text: `📍 ${p.name} をGoogle マップで見る`,
+                url: p.mapsUri,
+                embedUrl: null
+              });
+            });
+            output = placesText;
+          } else if (placesOk) {
+            // API成功だがmapsUri取得できず→汎用リンクにフォールバック
+            pendingLinks.push({
+              text: `📍 「${pQuery}」をGoogle マップで検索する`,
+              url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pQuery)}`,
+              embedUrl: null
+            });
+            output = placesText;
           } else {
-            // API 失敗時: Gemini に「リンクを表示した」と伝えてエラー発話を回避
+            // API 失敗時: 汎用リンク
+            pendingLinks.push({
+              text: `📍 「${pQuery}」をGoogle マップで検索する`,
+              url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pQuery)}`,
+              embedUrl: null
+            });
             output = `「${pQuery}」の検索リンクをご用意しました。詳しくはリンク先をご確認ください。`;
           }
         } else if (call.name === 'get_route') {
@@ -1757,6 +1792,7 @@ function doDisconnect() {
   pendingLinks          = [];
   isGreeted            = false;
   greetingComplete     = false;
+  userSpokeInTurn      = false;
   sessionActive        = false;
   googleLinkScheduled  = false;
   lastUserQuery        = '';
