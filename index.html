@@ -1560,22 +1560,26 @@ async function handleServerMsg(msg) {
       finishAiBubble();
 
       // AIの回答テキストから【スポット名】を検出して個別マップリンクを生成
+      // （Places APIがすでに個別リンクを返している場合はスキップ）
+      const _placesApiLinksExist = pendingLinks.some(l => l.text.startsWith('📍') && l.text.includes(' をGoogle マップで見る'));
       const _lastAiBubbleForLinks = chatEl.querySelectorAll('.row.assistant .bubble');
       const _aiBubbleText = _lastAiBubbleForLinks.length > 0
         ? _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1].textContent : '';
       const _spotMatches = [..._aiBubbleText.matchAll(/【([^】]{2,20})】/g)];
       if (_spotMatches.length > 0) {
-        // 汎用マップ検索リンクがすでにpendingLinksにある場合は削除（個別リンクで代替）
-        pendingLinks = pendingLinks.filter(l => !l.text.startsWith('📍') || l.text.includes(' をGoogle マップで見る'));
-        _spotMatches.forEach(m => {
-          const spotName = m[1];
-          pendingLinks.push({
-            text: `📍 ${spotName} をGoogle マップで見る`,
-            url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spotName)}`,
-            embedUrl: null
+        if (!_placesApiLinksExist) {
+          // Places APIリンクがない場合のみ：汎用リンクを除去して個別リンクを追加
+          pendingLinks = pendingLinks.filter(l => !l.text.startsWith('📍'));
+          _spotMatches.forEach(m => {
+            const spotName = m[1];
+            pendingLinks.push({
+              text: `📍 ${spotName} をGoogle マップで見る`,
+              url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spotName)}`,
+              embedUrl: null
+            });
           });
-        });
-        // AIバブルから【】タグを除去して見やすくする
+        }
+        // AIバブルから【】タグを除去して見やすくする（APIあり・なし両方）
         if (_lastAiBubbleForLinks.length > 0) {
           const _b = _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1];
           _b.textContent = _b.textContent.replace(/【([^】]+)】/g, '$1');
