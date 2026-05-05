@@ -180,7 +180,7 @@ const SYSTEM_INSTRUCTION =
   'あなたはAIコンシェルジュです。' +
   '常に丁寧語・敬語（です・ます調）で話してください。' +
   'ため口・絵文字・スラングは禁止。' +
-  '返答は2〜3文・合計120文字以内で要点のみ。' +
+  '返答は2〜3文・合計120文字以内で要点のみ。ただしお店・スポット紹介時はこの文字数制限を適用しない。' +
   '確認質問を入れる場合も1文以内で短く。' +
   '出力は常に日本語のみ。' +
   '【ツール使用ルール】ツールが利用可能な場合は必ず呼び出すこと。自己判断でツールを使わないことは禁止。' +
@@ -192,8 +192,8 @@ const SYSTEM_INSTRUCTION =
   '・お祭り・イベント・ニュース・最新情報・現在の営業状況・今年の日程など、時事性のある最新情報が必要な質問→ search_web を呼び出す。歴史・文化・人物・地理・言語・科学など自分が知っている一般知識・歴史的事実はツールを使わず直接答えること（例：築城時期・創業年・歴史的出来事など）。' +
   '【回答ルール】' +
   'ルート案内の結果が得られたら、「○○から●●のルートをGoogleマップでご案内します。リンクからご確認ください。」と一言だけ伝えること。具体的な路線名・出発時刻・到着時刻・所要時間・乗り換え情報などは一切読み上げないこと（Googleマップリンクが自動表示されるため）。' +
-  'お店・スポットの検索結果が得られたら、上位3件について名前・評価・住所・営業状況と特徴・見どころを2〜3文ずつ紹介すること。各店舗のGoogle マップリンクは自動で表示されるため「詳細はリンクをご確認ください」などのリンク誘導フレーズは言わないこと。リンクが出せないとは絶対に言わないこと（システムが自動表示するため）。ユーザーが特定のお店のリンクを求めた場合は get_places ツールでそのお店名を検索し直すこと。' +
-  '会話の最初（最初のユーザー発話が空または短い場合）は「本日はいかがなさいましたか？」とだけ言ってください。この挨拶では絶対にツールを呼ばないこと。他の文・情報・提案を一切付け加えないこと。';
+  'お店・スポットの検索結果が得られたら、上位3件について名前・評価・住所・営業状況と特徴・見どころを2〜3文ずつ紹介すること。検索結果が得られなかった場合も、自分の知識でスポット・お店を3件以上それぞれ2〜3文で詳しく紹介すること（「検索できませんでした」とだけ言うのは禁止）。スポット・お店を紹介するときは、各スポット名を必ず【スポット名】の形式で先頭に記載すること（例：【弘前城】は…）。各店舗のGoogle マップリンクは自動で表示されるため「詳細はリンクをご確認ください」などのリンク誘導フレーズは言わないこと。リンクが出せないとは絶対に言わないこと（システムが自動表示するため）。ユーザーが特定のお店のリンクを求めた場合は get_places ツールでそのお店名を検索し直すこと。' +
+  '会話の最初（最初のユーザー発話が空または短い場合）は「本日はいかがなさいました？」とだけ言ってください。この挨拶では絶対にツールを呼ばないこと。他の文・情報・提案を一切付け加えないこと。';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  DOM
@@ -643,10 +643,14 @@ async function fetchPlaces(query) {
                    p.regularOpeningHours?.openNow === false ? '営業時間外' : '';
     return `${i+1}. ${name} ${rating} ${open} ${addr}`.trim();
   }).join('\n');
-  const placeLinks = top.slice(0, 3).map(p => ({
-    name:    p.displayName?.text || '不明',
-    mapsUri: p.googleMapsUri || null
-  })).filter(p => p.mapsUri);
+  const placeLinks = top.slice(0, 3).map(p => {
+    const name = p.displayName?.text || '不明';
+    const addr = (p.formattedAddress || '').replace('日本、', '');
+    // googleMapsUri がなければ名前+住所でマップ検索URLを構築
+    const mapsUri = p.googleMapsUri ||
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name + ' ' + addr)}`;
+    return { name, mapsUri };
+  });
   return { text, placeLinks };
 }
 
@@ -1118,14 +1122,28 @@ function uint8ToBase64(u8) {
 }
 
 function flushMicChunks() {
-  if (aiTalking) { micBuffer = []; return; }  // AI発話中はバッファを捨てて送らない
   if (!ws || ws.readyState !== WebSocket.OPEN || micBuffer.length === 0) return;
+
   const total = micBuffer.reduce((s, c) => s + c.length, 0);
   const merged = new Int16Array(total);
   let offset = 0;
   for (const c of micBuffer) { merged.set(c, offset); offset += c.length; }
-  micBuffer = [];
 
+  // AI発話中はRMS音量を計測してエコーか実発話かを判定
+  if (aiTalking) {
+    const rms = Math.sqrt(merged.reduce((s, v) => s + v * v, 0) / merged.length) / 32768;
+    const BARGE_IN_THRESHOLD = 0.06;  // 0〜1スケール。エコー≈0.01〜0.03、肉声≈0.06〜
+    if (rms < BARGE_IN_THRESHOLD) {
+      micBuffer = [];  // エコー程度の音量 → 捨てる
+      return;
+    }
+    // 閾値超え = ユーザーが割り込んで発話 → 再生を即停止してバージイン
+    console.info('[barge-in] rms:', rms.toFixed(4), '→ 割り込み検出');
+    stopPlayback();
+    aiTalking = false;
+  }
+
+  micBuffer = [];
   const b64 = uint8ToBase64(new Uint8Array(merged.buffer));
   ws.send(JSON.stringify({
     realtimeInput: {
@@ -1506,12 +1524,17 @@ async function handleServerMsg(msg) {
     if (sc.inputTranscription) {
       const t = sc.inputTranscription.text || '';
       console.info('[inputTranscription]', t);
-      if (t) {
+      // 非日本語（英語など）の誤認識テキストは表示・蓄積しない
+      const _hasJapanese = /[぀-ゟ゠-ヿ一-鿿･-ﾟ]/.test(t);
+      const _latinOnly   = /^[a-zA-Z0-9\s\W]+$/.test(t.trim());
+      if (t && (_hasJapanese || !_latinOnly)) {
         if (!pendingUserBubble) pendingUserBubble = appendBubble('', 'user');
         pendingUserBubble.textContent += t;
         lastUserQuery += t;  // ターン内のユーザー発話を蓄積
         userSpokeInTurn = true;  // このターンでユーザーが実際に発話した
         scrollBottom();
+      } else if (t) {
+        console.info('[inputTranscription] 非日本語テキストをスキップ:', t);
       }
     }
 
@@ -1535,6 +1558,30 @@ async function handleServerMsg(msg) {
     // ターン完了
     if (sc.turnComplete) {
       finishAiBubble();
+
+      // AIの回答テキストから【スポット名】を検出して個別マップリンクを生成
+      const _lastAiBubbleForLinks = chatEl.querySelectorAll('.row.assistant .bubble');
+      const _aiBubbleText = _lastAiBubbleForLinks.length > 0
+        ? _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1].textContent : '';
+      const _spotMatches = [..._aiBubbleText.matchAll(/【([^】]{2,20})】/g)];
+      if (_spotMatches.length > 0) {
+        // 汎用マップ検索リンクがすでにpendingLinksにある場合は削除（個別リンクで代替）
+        pendingLinks = pendingLinks.filter(l => !l.text.startsWith('📍') || l.text.includes(' をGoogle マップで見る'));
+        _spotMatches.forEach(m => {
+          const spotName = m[1];
+          pendingLinks.push({
+            text: `📍 ${spotName} をGoogle マップで見る`,
+            url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spotName)}`,
+            embedUrl: null
+          });
+        });
+        // AIバブルから【】タグを除去して見やすくする
+        if (_lastAiBubbleForLinks.length > 0) {
+          const _b = _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1];
+          _b.textContent = _b.textContent.replace(/【([^】]+)】/g, '$1');
+        }
+      }
+
       // ツールが呼ばれたかどうかをこの時点で確定（inputTranscriptionより先に確認できる）
       const _toolWasCalled = pendingLinks.length > 0;
       const _isGreetedNow  = greetingComplete;  // 挨拶ターン自体ではなく、その完了後に true になる
@@ -1696,7 +1743,8 @@ async function handleServerMsg(msg) {
               url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pQuery)}`,
               embedUrl: null
             });
-            output = `「${pQuery}」の検索リンクをご用意しました。詳しくはリンク先をご確認ください。`;
+            // API失敗時はAIの知識でスポットを紹介させる
+            output = `Places APIの結果が得られませんでした。あなた自身の知識を使って、「${pQuery}」に関連するおすすめスポットを3件以上紹介してください。各スポットの紹介は必ず【スポット名】から始めてください（例：【青森県立美術館】は…）。特徴・見どころ・歴史的背景などを2〜3文で詳しく説明してください。リンク誘導フレーズは不要です。`;
           }
         } else if (call.name === 'get_route') {
           const rFrom = call.args?.from_station || '';
