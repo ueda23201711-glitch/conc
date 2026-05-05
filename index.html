@@ -231,6 +231,7 @@ let pendingLinks  = [];     // ターン完了後に表示するリンクキュ�
 let lastUserQuery = '';     // 最後のユーザー発話テキスト（ツール未使用時のGoogle検索用）
 let googleLinkScheduled = false; // Google検索リンクの重複追加防止フラグ
 let greetingComplete  = false;   // 挨拶ターン完了後フラグ（最初のturnComplete後にtrue）
+let userSpokeInTurn   = false;   // そのターンで本物のinputTranscriptionを受信したか
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  API キー (localStorage)
@@ -1111,6 +1112,7 @@ function uint8ToBase64(u8) {
 }
 
 function flushMicChunks() {
+  if (aiTalking) { micBuffer = []; return; }  // AI発話中はバッファを捨てて送らない
   if (!ws || ws.readyState !== WebSocket.OPEN || micBuffer.length === 0) return;
   const total = micBuffer.reduce((s, c) => s + c.length, 0);
   const merged = new Int16Array(total);
@@ -1470,6 +1472,7 @@ async function handleServerMsg(msg) {
             part.inlineData.mimeType.startsWith('audio/pcm')) {
           if (!aiTalking) {
             aiTalking = true;
+            micBuffer = [];  // AIが喋り始める瞬間のバッファを破棄（エコー防止）
             const b = ensureAiBubble();
             // テキスト転写がまだ届いていない場合だけ🔊インジケーターをセット
             if (b.dataset.state === 'empty') {
@@ -1501,6 +1504,7 @@ async function handleServerMsg(msg) {
         if (!pendingUserBubble) pendingUserBubble = appendBubble('', 'user');
         pendingUserBubble.textContent += t;
         lastUserQuery += t;  // ターン内のユーザー発話を蓄積
+        userSpokeInTurn = true;  // このターンでユーザーが実際に発話した
         scrollBottom();
       }
     }
@@ -1545,7 +1549,7 @@ async function handleServerMsg(msg) {
       pendingUserBubble = null;
       // ツールが呼ばれなかった場合: 500ms後にユーザーテキストを取得してGoogle検索リンクを追加
       // （inputTranscription が turnComplete より遅れて届くことがあるため遅延実行）
-      if (!_toolWasCalled && _isGreetedNow && !googleLinkScheduled) {
+      if (!_toolWasCalled && _isGreetedNow && !googleLinkScheduled && userSpokeInTurn) {
         googleLinkScheduled = true;  // 重複スケジュール防止
         setTimeout(() => {
           // DOMの最後のユーザーバブルから直接テキストを取得（最も確実）
@@ -1562,8 +1566,9 @@ async function handleServerMsg(msg) {
       } else {
         lastUserQuery = '';
       }
+      userSpokeInTurn = false;  // 次ターン用にリセット
       const waitMs = Math.max(300, (nextPlayAt - (playCtx ? playCtx.currentTime : 0)) * 1000 + 500);
-      setTimeout(() => { aiTalking = false; }, waitMs);
+      setTimeout(() => { micBuffer = []; aiTalking = false; }, waitMs);  // 再生完了後にバッファも捨てる
       setListening(true);
     }
 
@@ -1757,6 +1762,7 @@ function doDisconnect() {
   pendingLinks          = [];
   isGreeted            = false;
   greetingComplete     = false;
+  userSpokeInTurn      = false;
   sessionActive        = false;
   googleLinkScheduled  = false;
   lastUserQuery        = '';
