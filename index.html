@@ -228,6 +228,7 @@ let flushTimer    = null;
 let isGreeted     = false;   // 挨拶済みフラグ
 let sessionActive = false;  // setupComplete後のセッション中フラグ
 let pendingLinks  = [];     // ターン完了後に表示するリンクキュー
+let placesApiLinksAdded = false;  // Places APIが個別リンクを返したターンかどうか
 let lastUserQuery = '';     // 最後のユーザー発話テキスト（ツール未使用時のGoogle検索用）
 let googleLinkScheduled = false; // Google検索リンクの重複追加防止フラグ
 let greetingComplete  = false;   // 挨拶ターン完了後フラグ（最初のturnComplete後にtrue）
@@ -1560,14 +1561,13 @@ async function handleServerMsg(msg) {
       finishAiBubble();
 
       // AIの回答テキストから【スポット名】を検出して個別マップリンクを生成
-      // （Places APIがすでに個別リンクを返している場合はスキップ）
-      const _placesApiLinksExist = pendingLinks.some(l => l.text.startsWith('📍') && l.text.includes(' をGoogle マップで見る'));
+      // Places APIが個別リンクを返した場合はスキップ（フラグで管理）
       const _lastAiBubbleForLinks = chatEl.querySelectorAll('.row.assistant .bubble');
       const _aiBubbleText = _lastAiBubbleForLinks.length > 0
         ? _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1].textContent : '';
       const _spotMatches = [..._aiBubbleText.matchAll(/【([^】]{2,20})】/g)];
       if (_spotMatches.length > 0) {
-        if (!_placesApiLinksExist) {
+        if (!placesApiLinksAdded) {
           // Places APIリンクがない場合のみ：汎用リンクを除去して個別リンクを追加
           pendingLinks = pendingLinks.filter(l => !l.text.startsWith('📍'));
           _spotMatches.forEach(m => {
@@ -1585,6 +1585,7 @@ async function handleServerMsg(msg) {
           _b.textContent = _b.textContent.replace(/【([^】]+)】/g, '$1');
         }
       }
+      placesApiLinksAdded = false;  // 次ターンのためにリセット
 
       // ツールが呼ばれたかどうかをこの時点で確定（inputTranscriptionより先に確認できる）
       const _toolWasCalled = pendingLinks.length > 0;
@@ -1731,6 +1732,7 @@ async function handleServerMsg(msg) {
                 embedUrl: null
               });
             });
+            placesApiLinksAdded = true;  // Places APIが個別リンクを提供したことを記録
             output = placesText;
           } else if (placesOk) {
             // API成功だがmapsUri取得できず→汎用リンクにフォールバック
