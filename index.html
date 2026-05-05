@@ -1,0 +1,1843 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>AIコンシェルジュ - Gemini</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <!-- ホーム画面アイコン (iOS / Android / PC) -->
+  <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+  <link rel="apple-touch-icon" sizes="167x167" href="icon-167.png">
+  <link rel="apple-touch-icon" sizes="152x152" href="icon-152.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="shortcut icon" href="favicon.ico">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AIコンシェルジュ">
+  <style>
+    :root {
+      --green: #2e7d32; --green-50: #e8f5e9;
+      --border: #e5e7eb; --bubble-left: #f1f5f9;
+      --bubble-right: #d1fae5; --bubble-sys: #fffbe6;
+    }
+    html, body { height: 100%; max-height: 100%; margin: 0; overflow: hidden; background: var(--green-50);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+      "Apple Color Emoji", "Segoe UI Emoji"; }
+    .wrap  { height: 100%; max-height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+    header { background: var(--green); color: #fff; padding: 14px 12px;
+      text-align: center; font-weight: 700; letter-spacing: .03em;
+      position: sticky; top: 0; z-index: 1000; }
+    header .title { max-width: 900px; margin: 0 auto; display: inline-flex;
+      align-items: flex-end; gap: 8px; }
+    header .ver { font-size: 12px; opacity: .8; font-weight: 600; }
+    main  { flex: 1; display: flex; justify-content: center; padding: 10px; min-height: 0; overflow: hidden; }
+    .stage { width: 100%; max-width: 900px; display: flex; flex-direction: column;
+      gap: 8px; flex: 1; min-height: 0; }
+    .status-row { display: flex; justify-content: flex-end; }
+    .status-pill { font-size: 12px; background: #fff; border: 1px solid var(--border);
+      padding: 4px 10px; border-radius: 999px; color: #374151; }
+    .chat-shell { background: #fff; border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: 0 1px 6px rgba(0,0,0,.04); display: flex; flex-direction: column;
+      flex: 1; min-height: 0; }
+    .chat { flex: 1; min-height: 0; overflow-y: scroll; padding: 14px 12px 80px; }
+    .row  { display: flex; margin: 6px 0; }
+    .row.user      { justify-content: flex-end; }
+    .row.assistant { justify-content: flex-start; }
+    .row.system    { justify-content: center; font-size: 12px; color: #6b7280; }
+    .bubble { max-width: 68%; border-radius: 14px; padding: 10px 12px;
+      line-height: 1.45; word-break: break-word; white-space: pre-wrap; }
+    .assistant .bubble { background: var(--bubble-left); border: 1px solid #e2e8f0; }
+    .user      .bubble { background: var(--bubble-right); border: 1px solid #a7f3d0; }
+    .system    .bubble { background: var(--bubble-sys); border: 1px solid #fef08a;
+      max-width: 80%; font-size: 12px; }
+    footer { position: sticky; bottom: 0; left: 0; right: 0;
+      background: var(--green-50); padding: 8px 10px; border-top: 1px solid var(--border); }
+    .foot-inner { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+    /* API key 入力行 */
+    .api-row { display: flex; gap: 8px; }
+    .api-input { flex: 1; border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 12px; font-size: 14px; }
+    .api-input:focus { outline: 2px solid var(--green); }
+    /* ボタン行 */
+    .btn-row { display: flex; gap: 8px; align-items: center; }
+    .btn { flex: 1; appearance: none; border: 1px solid var(--border); background: #fff;
+      padding: 12px 10px; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 15px; }
+    .btn:disabled { opacity: .6; cursor: not-allowed; }
+    .btn.primary { background: var(--green); border-color: var(--green); color: #fff; }
+    .btn.danger  { background: #ef4444; border-color: #ef4444; color: #fff; }
+    .toggle { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 14px; }
+    .switch { position: relative; width: 56px; height: 32px; background: #e5e7eb;
+      border-radius: 999px; cursor: pointer; border: 1px solid var(--border); }
+    .knob   { position: absolute; top: 3px; left: 3px; width: 26px; height: 26px;
+      background: #fff; border-radius: 50%; transition: transform .2s ease; }
+    .switch.on { background: var(--green); }
+    .switch.on .knob { transform: translateX(24px); }
+    /* テキスト入力行 */
+    .input-row { display: flex; gap: 8px; }
+    .text { flex: 1; border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 12px; font-size: 16px; }
+    .text:disabled { background: #f3f4f6; cursor: not-allowed; }
+    .send { padding: 12px 16px; border-radius: 10px; border: 1px solid var(--green);
+      background: var(--green); color: #fff; font-weight: 700; cursor: pointer; white-space: nowrap; }
+    .send:disabled { background: #9ca3af; border-color: #9ca3af; cursor: not-allowed; }
+    /* カーソルアニメーション */
+    .typing::after { content: '▋'; animation: blink 1s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    /* マイク波形インジケータ */
+    .mic-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: #22c55e; margin-right: 6px; animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.5);opacity:.6} }
+    @supports (padding: max(0px)) {
+      footer { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+    }
+
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title">
+      <span class="name">AIコンシェルジュ</span>
+      <span class="ver">Gemini</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="stage">
+      <div class="status-row"><div id="status" class="status-pill">未接続</div></div>
+      <div class="chat-shell">
+        <div id="chat" class="chat" aria-live="polite" aria-label="会話"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="foot-inner">
+      <!-- API キー入力（接続後は非表示） -->
+      <div class="api-row" id="apiRow">
+        <input id="apiKey" class="api-input" type="password"
+          placeholder="Gemini API キーを入力（接続後は非表示になります）"
+          autocomplete="off" spellcheck="false">
+
+        <input id="navitimeKey" class="api-input" type="password"
+          placeholder="NAVITIME APIキー（RapidAPI）（ルート案内用）"
+          autocomplete="off" spellcheck="false" style="margin-top:6px">
+        <input id="placesKey" class="api-input" type="password"
+          placeholder="Google Places APIキー（New）（お店・場所検索用）"
+          autocomplete="off" spellcheck="false" style="margin-top:6px">
+      </div>
+      <!-- 接続ボタン行 -->
+      <div class="btn-row">
+        <button id="start"  class="btn primary">会話開始</button>
+        <button id="hangup" class="btn danger" disabled>切断</button>
+        <div class="toggle">
+          <span id="voiceLabel">音声オン</span>
+          <div id="voiceSwitch" class="switch on" role="switch" aria-checked="true" tabindex="0">
+            <div class="knob"></div>
+          </div>
+        </div>
+      </div>
+      <!-- テキスト入力行 -->
+      <div class="input-row">
+        <input id="textInput" class="text" type="text"
+          placeholder="テキストで相談…" disabled>
+        <button id="sendBtn" class="send" disabled>送信</button>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script>
+'use strict';
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  定数・設定
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+// 利用可能なモデルを優先順に試す
+const MODEL_CANDIDATES = [
+  'models/gemini-2.5-flash-native-audio-latest',        // 安定版（優先）
+  'models/gemini-2.5-flash-native-audio-preview-12-2025',
+  'models/gemini-2.5-flash-native-audio-preview-09-2025',
+  'models/gemini-3.1-flash-live-preview',
+  'models/gemini-2.0-flash-live-001',
+];
+let MODEL = MODEL_CANDIDATES[0]; // connect() 内で動的に決定
+
+const IN_RATE  = 16000;   // マイク入力サンプルレート (Hz)
+const OUT_RATE = 24000;   // Gemini 出力サンプルレート (Hz)
+const FLUSH_MS = 100;     // 音声チャンク送信間隔 (ms)
+const STORAGE_KEY      = 'gemini_concierge_apikey';
+const NAVITIME_STORAGE_KEY = 'navitime_apikey';
+const PLACES_STORAGE_KEY   = 'places_apikey';
+
+const SYSTEM_INSTRUCTION =
+  'あなたはAIコンシェルジュです。' +
+  '常に丁寧語・敬語（です・ます調）で話してください。' +
+  'ため口・絵文字・スラングは禁止。' +
+  '返答は2〜3文・合計120文字以内で要点のみ。' +
+  '確認質問を入れる場合も1文以内で短く。' +
+  '出力は常に日本語のみ。' +
+  '【ツール使用ルール】ツールが利用可能な場合は必ず呼び出すこと。自己判断でツールを使わないことは禁止。' +
+  '・天気・気象→ get_current_weather を必ず呼び出す。' +
+  '・日付・時刻・曜日→ get_current_datetime を必ず呼び出す。' +
+  '・電車・路線の運行状況・遅延・運休→ get_train_status を呼び出す。・次の電車・時刻表→ get_next_trains を呼び出す。目的地がわかっている場合は to_station にも設定すること。「○○から△△への次の電車は？」という質問では station=○○、to_station=△△ を設定すること。' +
+  '・〇〇駅から●●駅への行き方・ルート案内・乗り換え→ get_route を必ず呼び出す。出発時刻が指定された場合は departure_time="HH:MM" を設定し、明日なら departure_date="tomorrow" も設定すること。' +
+  '・レストラン・お店・カフェ・観光スポット・施設・おすすめを聞かれたら→ get_places を必ず呼び出す。' +
+  '・お祭り・イベント・ニュース・最新情報・現在の営業状況・今年の日程など、時事性のある最新情報が必要な質問→ search_web を呼び出す。歴史・文化・人物・地理・言語・科学など自分が知っている一般知識・歴史的事実はツールを使わず直接答えること（例：築城時期・創業年・歴史的出来事など）。' +
+  '【回答ルール】' +
+  'ルート案内の結果が得られたら、「○○から●●のルートをGoogleマップでご案内します。リンクからご確認ください。」と一言だけ伝えること。具体的な路線名・出発時刻・到着時刻・所要時間・乗り換え情報などは一切読み上げないこと（Googleマップリンクが自動表示されるため）。' +
+  'お店・スポットの検索結果が得られたら、1件目について「名前・評価・住所（区・市まで）・営業状況」に加えて、そのスポットやお店の特徴・見どころ・おすすめポイント・雰囲気・歴史的背景など合計5〜6文で具体的に紹介すること。「詳細はリンクをご確認ください」「詳しくはリンクから」などのリンク誘導フレーズは一切言わないこと（リンクは自動表示されるため）。' +
+  '会話の最初（最初のユーザー発話が空または短い場合）は「本日はいかがなさいましたか？」とだけ言ってください。この挨拶では絶対にツールを呼ばないこと。他の文・情報・提案を一切付け加えないこと。';
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  DOM
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const $ = s => document.querySelector(s);
+const chatEl       = $('#chat');
+const statusEl     = $('#status');
+const startBtn     = $('#start');
+const hangupBtn    = $('#hangup');
+const textInputEl  = $('#textInput');
+const sendBtnEl    = $('#sendBtn');
+const apiKeyEl     = $('#apiKey');
+const apiRowEl     = $('#apiRow');
+const voiceSwitchEl= $('#voiceSwitch');
+const voiceLabelEl = $('#voiceLabel');
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  状態
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let ws            = null;
+let captureCtx    = null;
+let playCtx       = null;
+let mediaStream   = null;
+let scriptProc    = null;
+let nextPlayAt    = 0;
+let aiTalking     = false;  // AI音声再生中フラグ       // 次回再生開始時刻 (AudioContext.currentTime)
+let voiceOn       = true;
+let pendingBubble     = null;
+let pendingUserBubble = null;    // 構築中のAIバブル
+let micBuffer     = [];      // PCM Int16 チャンクキュー
+let flushTimer    = null;
+let isGreeted     = false;   // 挨拶済みフラグ
+let sessionActive = false;  // setupComplete後のセッション中フラグ
+let pendingLinks  = [];     // ターン完了後に表示するリンクキュー
+let lastUserQuery = '';     // 最後のユーザー発話テキスト（ツール未使用時のGoogle検索用）
+let googleLinkScheduled = false; // Google検索リンクの重複追加防止フラグ
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  API キー (localStorage)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const savedKey = localStorage.getItem(STORAGE_KEY);
+if (savedKey) {
+  apiKeyEl.value = savedKey;
+  apiKeyEl.placeholder = '（保存済み）変更する場合は上書き入力';
+}
+const savedNavitimeKey = localStorage.getItem(NAVITIME_STORAGE_KEY);
+if (savedNavitimeKey) {
+  document.getElementById('navitimeKey').value = savedNavitimeKey;
+  document.getElementById('navitimeKey').placeholder = 'NAVITIMEキー（保存済み）';
+}
+const savedPlacesKey = localStorage.getItem(PLACES_STORAGE_KEY);
+if (savedPlacesKey) {
+  document.getElementById('placesKey').value = savedPlacesKey;
+  document.getElementById('placesKey').placeholder = 'Google Places APIキー（保存済み）';
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  UI ユーティリティ
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const setStatus = text => { statusEl.textContent = text; };
+
+function scrollBottom() {
+  // smooth を使わず即時スクロール（smooth だと連続代入が無視される）
+  chatEl.scrollTop = chatEl.scrollHeight;
+  requestAnimationFrame(() => { chatEl.scrollTop = chatEl.scrollHeight; });
+}
+
+function appendBubble(text, role) {
+  const row = document.createElement('div');
+  row.className = `row ${role}`;
+  const b = document.createElement('div');
+  b.className = 'bubble';
+  b.textContent = text;
+  row.appendChild(b);
+  chatEl.appendChild(row);
+  scrollBottom();
+  return b;
+}
+
+// HTML エスケープ（blobページ内の文字列を安全に埋め込む）
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// 新タブで「会話に戻る」バナー付きラッパーページを開く
+// embedUrl: iframeに表示するURL（Maps Embed API など）
+// fallbackUrl: embedUrlがない場合に直接開くURL
+// title: ラッパーページのタイトル
+function openInWrapper(embedUrl, fallbackUrl, title) {
+  if (!embedUrl) {
+    // Maps Embed API キー未設定 → そのまま新タブで開く
+    window.open(fallbackUrl, '_blank');
+    return;
+  }
+  const html = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+
+  <title>${escHtml(title)}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body{height:100%;display:flex;flex-direction:column;
+      font-family:system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+    .hdr{background:#2e7d32;color:#fff;padding:10px 14px;
+      display:flex;align-items:center;gap:10px;flex-shrink:0;
+      box-shadow:0 2px 8px rgba(0,0,0,.2);min-height:52px}
+    .back{background:#fff;color:#2e7d32;border:none;
+      padding:9px 18px;border-radius:9px;font-weight:700;
+      font-size:15px;cursor:pointer;white-space:nowrap;
+      box-shadow:0 1px 4px rgba(0,0,0,.12)}
+    .back:active{opacity:.8}
+    .ttl{flex:1;font-size:14px;font-weight:600;opacity:.92;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .frame{flex:1;border:none;width:100%;display:block}
+    .err{display:none;flex:1;align-items:center;justify-content:center;
+      flex-direction:column;gap:14px;padding:24px;text-align:center;
+      color:#6b7280;font-size:15px}
+    .err a{color:#2e7d32;font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="hdr">
+    <button class="back" onclick="if(opener&&!opener.closed){opener.focus();}window.close()">
+      ← 会話に戻る
+    </button>
+    <span class="ttl">${escHtml(title)}</span>
+  </div>
+  <iframe class="frame" id="frm" src="${escHtml(embedUrl)}"
+    allowfullscreen allow="geolocation"></iframe>
+  <div class="err" id="err">
+    <div>⚠️ このページはiframe内に表示できません</div>
+    <a href="${escHtml(fallbackUrl)}" target="_top">直接開く ↗</a>
+  </div>
+  <script>
+    // iframe読み込みエラー検知（X-Frame-Optionsで弾かれた場合）
+    const frm = document.getElementById('frm');
+    const errEl = document.getElementById('err');
+    frm.addEventListener('error', () => {
+      frm.style.display = 'none';
+      errEl.style.display = 'flex';
+    });
+    // 5秒後にiframeのheight確認（一部ブラウザ対策）
+    setTimeout(() => {
+      try { if(!frm.contentDocument) throw 1; }
+      catch { /* cross-origin: 正常 */ }
+    }, 5000);
+  <\/script>
+</body>
+</html>`;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const blobUrl = URL.createObjectURL(blob);
+  window.open(blobUrl, '_blank');
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+}
+
+// リンク付きバブル
+// items: Array<{text, url, embedUrl?}>
+//   embedUrl がある場合 → openInWrapper（ラッパーページ）
+//   ない場合            → window.open（新タブ直接）
+function appendBubbleWithLinks(items, role) {
+  const row = document.createElement('div');
+  row.className = `row ${role}`;
+  const b = document.createElement('div');
+  b.className = 'bubble';
+  b.style.lineHeight = '1.9';
+  items.forEach((item, i) => {
+    if (i > 0) b.appendChild(document.createElement('br'));
+    if (item.url) {
+      const a = document.createElement('a');
+      a.href = item.url;
+      a.textContent = item.text;
+      a.style.cssText = 'color:var(--green);text-decoration:underline;word-break:break-all;cursor:pointer;';
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        const title = item.text.replace(/^\S+\s*/, '').slice(0, 30);
+        openInWrapper(item.embedUrl || null, item.url, title);
+      });
+      b.appendChild(a);
+    } else {
+      b.appendChild(document.createTextNode(item.text));
+    }
+  });
+  row.appendChild(b);
+  chatEl.appendChild(row);
+  scrollBottom();
+  return b;
+}
+
+// AI応答バブル（ストリーミング用）
+function ensureAiBubble() {
+  if (!pendingBubble) {
+    const row = document.createElement('div');
+    row.className = 'row assistant';
+    const b = document.createElement('div');
+    b.className = 'bubble typing';
+    b.textContent = '';
+    // data-state: 'empty' | 'indicator' | 'text'
+    b.dataset.state = 'empty';
+    row.appendChild(b);
+    chatEl.appendChild(row);
+    pendingBubble = b;
+    scrollBottom();
+  }
+  return pendingBubble;
+}
+
+function finishAiBubble() {
+  if (!pendingBubble) return;
+  pendingBubble.classList.remove('typing');
+  // テキスト転写が届かなかった場合（音声のみ）のフォールバック
+  if (pendingBubble.dataset.state !== 'text') {
+    pendingBubble.textContent = '（音声応答）';
+  }
+  pendingBubble.dataset.state = 'done';
+  pendingBubble = null;
+  scrollBottom();
+}
+
+// マイクインジケータ付きステータス
+function setListening(on) {
+  if (on) {
+    statusEl.innerHTML = '<span class="mic-dot"></span>聞いています';
+  } else {
+    setStatus('接続済み');
+  }
+}
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  天気情報取得（Open-Meteo / 無料・APIキー不要）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const WX_CODE = {
+  0:'快晴',1:'晴れ',2:'一部曇り',3:'曇り',
+  45:'霧',48:'霧氷',
+  51:'小雨',53:'雨',55:'強雨',
+  61:'小雨',63:'雨',65:'大雨',
+  71:'小雪',73:'雪',75:'大雪',77:'霰',
+  80:'にわか雨',81:'雨',82:'激しい雨',
+  85:'にわか雪',86:'大雪',
+  95:'雷雨',96:'雷雨（雹）',99:'激しい雷雨'
+};
+
+// 天気コード→絵文字
+function wxEmoji(cond) {
+  if (!cond) return '🌡';
+  if (cond.includes('快晴') || cond.includes('晴れ')) return '☀️';
+  if (cond.includes('曇りがち') || cond.includes('薄曇')) return '🌤';
+  if (cond.includes('曇り')) return '☁️';
+  if (cond.includes('霧雨') || cond.includes('小雨')) return '🌦';
+  if (cond.includes('雨')) return '🌧';
+  if (cond.includes('雷')) return '⛈';
+  if (cond.includes('霙') || cond.includes('みぞれ')) return '🌨';
+  if (cond.includes('雪')) return '❄️';
+  if (cond.includes('霧')) return '🌫';
+  return '🌡';
+}
+
+// 天気カード用 Blob URL を生成（API不要・取得データから直接作成）
+function buildWeatherBlobUrl(card) {
+  const emoji = wxEmoji(card.cond);
+  const dateLabel = card.date === 'tomorrow' ? '明日の天気予報' : '現在の天気';
+  const tempRow = card.date === 'tomorrow'
+    ? `<div class="row-item"><span class="lbl">最高気温</span><span class="val">${card.tmax}°C</span></div>
+       <div class="row-item"><span class="lbl">最低気温</span><span class="val">${card.tmin}°C</span></div>
+       <div class="row-item"><span class="lbl">降水確率</span><span class="val">${card.rain}%</span></div>
+       <div class="row-item"><span class="lbl">最大風速</span><span class="val">${card.wind} m/s</span></div>`
+    : `<div class="row-item"><span class="lbl">気温</span><span class="val">${card.temp}°C</span></div>
+       <div class="row-item"><span class="lbl">体感温度</span><span class="val">${card.feels}°C</span></div>
+       <div class="row-item"><span class="lbl">湿度</span><span class="val">${card.hum}%</span></div>
+       <div class="row-item"><span class="lbl">風速</span><span class="val">${card.wind} m/s</span></div>`;
+  const html = `<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>${card.name} ${dateLabel}</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;display:flex;flex-direction:column;min-height:100vh;background:#e8f5e9}
+  .hdr{background:#2e7d32;color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.2);min-height:52px}
+  .back{background:#fff;color:#2e7d32;border:none;padding:9px 18px;border-radius:9px;font-weight:700;font-size:15px;cursor:pointer}
+  .ttl{flex:1;font-size:14px;font-weight:600}
+  .card{margin:28px auto;background:#fff;border-radius:20px;padding:32px 28px;max-width:380px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,.10);text-align:center}
+  .place{font-size:20px;font-weight:700;color:#1b5e20;margin-bottom:4px}
+  .date-lbl{font-size:13px;color:#666;margin-bottom:20px}
+  .emoji{font-size:72px;line-height:1;margin:12px 0}
+  .cond{font-size:24px;font-weight:700;color:#333;margin-bottom:24px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px}
+  .row-item{background:#f1f8e9;border-radius:12px;padding:14px 10px}
+  .lbl{display:block;font-size:12px;color:#666;margin-bottom:4px}
+  .val{display:block;font-size:20px;font-weight:700;color:#2e7d32}
+  .src{font-size:11px;color:#aaa;margin-top:22px}
+</style></head>
+<body>
+  <div class="hdr">
+    <button class="back" onclick="if(opener&&!opener.closed){opener.focus();}window.close()">← 会話に戻る</button>
+    <span class="ttl">${card.name} ${dateLabel}</span>
+  </div>
+  <div class="card">
+    <div class="place">${card.name}</div>
+    <div class="date-lbl">${dateLabel}</div>
+    <div class="emoji">${emoji}</div>
+    <div class="cond">${card.cond}</div>
+    <div class="grid">${tempRow}</div>
+    <div class="src">データ: Open-Meteo / OpenStreetMap</div>
+  </div>
+</body></html>`;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  return url;
+}
+
+async function fetchWeather(location, date = 'today') {
+  // ① ジオコーディング: Nominatim（日本語地名対応・無料）を使用
+  const fetchWithTimeout = (url, opts = {}, ms = 8000) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
+  };
+
+  const nomUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&countrycodes=jp&limit=3&accept-language=ja`;
+  let nomResp, nomData;
+  try {
+    nomResp = await fetchWithTimeout(nomUrl, {
+      headers: { 'Accept-Language': 'ja', 'Accept': 'application/json' }
+    });
+    nomData = await nomResp.json();
+  } catch (e) {
+    return { text: `「${location}」の位置情報の取得に失敗しました（${e.name === 'AbortError' ? 'タイムアウト' : e.message}）`, blobUrl: null };
+  }
+  if (!nomData?.length) return { text: `「${location}」の位置情報が見つかりませんでした。`, blobUrl: null };
+
+  const best = nomData[0];
+  const lat  = parseFloat(best.lat);
+  const lon  = parseFloat(best.lon);
+  const name = best.display_name?.split('、')[0] || location;
+
+  if (date === 'tomorrow') {
+    const wxUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,wind_speed_10m_max` +
+      `&timezone=auto&forecast_days=2`;
+    const wxData = await (await fetch(wxUrl)).json();
+    const d = wxData.daily;
+    const cond  = WX_CODE[d.weather_code[1]] ?? '不明';
+    const tmax  = Math.round(d.temperature_2m_max[1]);
+    const tmin  = Math.round(d.temperature_2m_min[1]);
+    const rain  = d.precipitation_probability_max[1];
+    const wind  = Math.round(d.wind_speed_10m_max[1] * 10) / 10;
+    const text  = `${name}（日本）の明日の天気予報: ${cond}、最高${tmax}°C／最低${tmin}°C、降水確率${rain}%、最大風速${wind}m/s`;
+    return { text, blobUrl: null };
+  } else {
+    // 今日の天気は日次予報（最高/最低/降水確率）で返す
+    const wxUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,wind_speed_10m_max` +
+      `&timezone=auto&forecast_days=1`;
+    const wxData = await (await fetch(wxUrl)).json();
+    const d     = wxData.daily;
+    const cond  = WX_CODE[d.weather_code[0]] ?? '不明';
+    const tmax  = Math.round(d.temperature_2m_max[0]);
+    const tmin  = Math.round(d.temperature_2m_min[0]);
+    const rain  = d.precipitation_probability_max[0];
+    const wind  = Math.round(d.wind_speed_10m_max[0] * 10) / 10;
+    const text  = `${name}（日本）の今日の天気予報: ${cond}、最高${tmax}°C／最低${tmin}°C、降水確率${rain}%、最大風速${wind}m/s`;
+    return { text, blobUrl: null };
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  交通情報取得（ODPT公共交通オープンデータ）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function getNavitimeKey() {
+  return document.getElementById('navitimeKey')?.value.trim() ||
+         localStorage.getItem(NAVITIME_STORAGE_KEY) || '';
+}
+function getPlacesKey() {
+  return document.getElementById('placesKey')?.value.trim() ||
+         localStorage.getItem(PLACES_STORAGE_KEY) || '';
+}
+
+
+async function fetchTrainStatus(railway = null) {
+  // ODPT廃止: 路線名をそのままGoogleへ渡すメッセージを返す
+  const line = railway ? `${railway}` : '鉄道';
+  return `${line}の運行状況はYahoo!路線情報でご確認いただけます。`;
+}
+async function fetchNextTrains(station, railway = null) {
+  // ODPT廃止: 駅時刻表はYahoo路線情報へ誘導
+  const s = station || '駅名不明';
+  return `${s}駅の時刻表はYahoo!路線情報でご確認いただけます。`;
+}
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  場所・お店検索（Google Places API New）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function fetchPlaces(query) {
+  const key = getPlacesKey();
+  if (!key) return 'Google Places APIキーが未設定です。接続前にPlacesキー欄に入力してください。';
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
+
+  let resp;
+  try {
+    resp = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: {
+        'Content-Type':      'application/json',
+        'X-Goog-Api-Key':    key,
+        'X-Goog-FieldMask':  'places.displayName,places.formattedAddress,places.rating,places.googleMapsUri,places.regularOpeningHours.openNow'
+      },
+      body: JSON.stringify({
+        textQuery:       query,
+        languageCode:    'ja',
+        maxResultCount:  5
+      })
+    });
+  } catch (e) {
+    const msg = e.name === 'AbortError' ? 'タイムアウト' : e.message;
+    return `Places検索エラー: ${msg}`;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  let data;
+  try { data = await resp.json(); } catch { return 'Places APIのレスポンスが不正です。'; }
+  console.info('[Places]', resp.status, JSON.stringify(data).slice(0, 300));
+
+  if (!resp.ok) return `Places APIエラー (${resp.status}): ${data.error?.message || JSON.stringify(data)}`;
+
+  const places = data.places || [];
+  if (!places.length) return `「${query}」に該当するお店・場所が見つかりませんでした。`;
+
+  // Geminiへ渡すテキスト（簡潔に）
+  return places.slice(0, 5).map((p, i) => {
+    const name   = p.displayName?.text || '不明';
+    const addr   = (p.formattedAddress || '').replace('日本、', '');
+    const rating = p.rating ? `★${p.rating}` : '';
+    const open   = p.regularOpeningHours?.openNow === true  ? '営業中' :
+                   p.regularOpeningHours?.openNow === false ? '営業時間外' : '';
+    return `${i+1}. ${name} ${rating} ${open} ${addr}`.trim();
+  }).join('\n');
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  ルート案内（OpenStreetMap Nominatim → NAVITIME）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ── OpenStreetMap Nominatim によるジオコーディング（無料・キー不要・ブラウザ対応）
+async function geocodeStation(stationName, fetcher = fetch) {
+  // 「駅」を末尾に付加して検索精度を向上
+  const query = stationName.endsWith('駅') ? stationName : stationName + '駅';
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&countrycodes=jp&limit=3`;
+
+  let resp;
+  try {
+    resp = await fetcher(url, {
+      headers: { 'Accept-Language': 'ja', 'Accept': 'application/json' }
+    });
+  } catch (e) {
+    const msg = e.name === 'AbortError' ? 'タイムアウト（8秒）' : e.message;
+    throw new Error(`Geocoding通信エラー: ${msg}`);
+  }
+
+  let results;
+  try { results = await resp.json(); } catch { results = []; }
+  console.info(`[Geocode Nominatim] "${stationName}" 件数:`, results.length, results[0]);
+
+  // 「railway=station」または「public_transport=stop_position」を優先
+  const station = results.find(r => r.type === 'station' || r.class === 'railway')
+                  || results[0];
+
+  if (!station) {
+    throw new Error(`「${stationName}」の位置情報が見つかりませんでした。駅名を確認してください。`);
+  }
+
+  const lat = parseFloat(station.lat);
+  const lng = parseFloat(station.lon);
+  console.info(`[Geocode] "${stationName}" → lat:${lat}, lng:${lng} (${station.display_name})`);
+  return { lat, lng };
+}
+
+// ルートカード用 Blob URL を構造化データから生成
+function buildRouteBlobFromData(fromStation, toStation, routeData, depTime, depDate) {
+  // Google マップ 乗換案内 URL（号数確認用）
+  const _r0 = routeData[0] || {};
+  let gmapsUrl;
+  if (depTime && /^\d{1,2}:\d{2}$/.test(depTime)) {
+    const _now = new Date();
+    const _jst = new Date(_now.getTime() + 9 * 3600 * 1000);
+    let [_y, _m, _d] = _jst.toISOString().slice(0, 10).split('-').map(Number);
+    if (depDate === 'tomorrow') {
+      const _t = new Date(Date.UTC(_y, _m - 1, _d + 1));
+      _y = _t.getUTCFullYear(); _m = _t.getUTCMonth() + 1; _d = _t.getUTCDate();
+    }
+    const [_hh, _mm] = depTime.split(':').map(Number);
+    const _epoch = Math.floor(new Date(_y, _m - 1, _d, _hh, _mm).getTime() / 1000);
+    gmapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(fromStation + '駅')}&destination=${encodeURIComponent(toStation + '駅')}&travelmode=transit&hl=ja&dirflg=r`;
+  } else {
+    gmapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(fromStation + '駅')}&destination=${encodeURIComponent(toStation + '駅')}&travelmode=transit&hl=ja`;
+  }
+
+  const routeCards = routeData.map((r, idx) => {
+    const fareHtml = ''; // 運賃は乗車券のみで特急料金等が含まれないため非表示
+
+    const segHtml = r.segments.map(seg => `
+      <div class="seg train">
+        <div class="seg-from">${seg.fromStn}${seg.ft ? '<span class="tm">' + seg.ft + '発</span>' : ''}</div>
+        <div class="seg-line">🚃 ${seg.line}</div>
+        <div class="seg-to">${seg.toStn}${seg.tt ? '<span class="tm">' + seg.tt + '着</span>' : ''}</div>
+      </div>`).filter(s => s.trim()).join('<div class="transfer">🔄 乗換</div>');
+
+    return `<div class="route-card ${idx === 0 ? 'best' : ''}">
+      <div class="route-hdr">
+        <span class="rnum">ルート${idx + 1}${idx === 0 ? ' ⭐' : ''}</span>
+        <span class="rtime">所要 <b>${r.duration}</b></span>
+        ${fareHtml}
+        <span class="rdep">${r.dep ? r.dep + ' 発 → ' + r.arr + ' 着' : ''}</span>
+      </div>
+      <div class="route-from-to">🚉 ${r.fromName} → ${r.toName}</div>
+      <div class="segments">${segHtml}</div>
+    </div>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>${fromStation} → ${toStation} ルート案内</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;background:#e8f5e9;min-height:100vh}
+  .hdr{background:#2e7d32;color:#fff;padding:12px 16px;text-align:center;font-size:16px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+  .body{padding:16px;max-width:520px;margin:0 auto;width:100%}
+  .page-title{text-align:center;font-size:18px;font-weight:700;color:#1b5e20;margin:12px 0 16px;padding:12px;background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+  .route-card{background:#fff;border-radius:14px;margin-bottom:14px;box-shadow:0 2px 10px rgba(0,0,0,.08);overflow:hidden}
+  .route-card.best{border:2px solid #2e7d32}
+  .route-hdr{background:#f1f8e9;padding:10px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .rnum{font-weight:700;color:#2e7d32;font-size:14px}
+  .rtime{font-size:15px;color:#333}
+  .rtime b{font-size:20px;color:#1b5e20}
+  .rfare{font-size:13px;color:#555;background:#c8e6c9;border-radius:6px;padding:2px 7px}
+  .rdep{font-size:13px;color:#555;margin-left:auto;white-space:nowrap}
+  .route-from-to{font-size:13px;font-weight:600;color:#2e7d32;padding:6px 16px 0;border-top:1px solid #f1f8e9}
+  .segments{padding:10px 16px 12px}
+  .seg.train{background:#f9fbe7;border-radius:10px;padding:10px 12px;margin:6px 0}
+  .seg-from,.seg-to{font-size:14px;font-weight:600;color:#333}
+  .seg-line{font-size:13px;color:#2e7d32;margin:4px 0;padding-left:4px}
+  .tm{font-size:13px;font-weight:400;color:#666;margin-left:6px}
+  .transfer{text-align:center;font-size:12px;color:#aaa;padding:3px 0}
+  .src{font-size:11px;color:#aaa;text-align:center;padding:10px 0 20px}
+  .gmaps-top{display:block;text-align:center;background:#1565c0;color:#fff;border-radius:12px;padding:11px;margin-bottom:14px;font-size:14px;font-weight:700;text-decoration:none}
+</style></head>
+<body>
+  <div class="hdr">🚉 ${fromStation} → ${toStation} ルート案内</div>
+  <div class="body">
+    <div class="page-title">🚉 ${fromStation} → ${toStation}</div>
+    <a class="gmaps-top" href="${gmapsUrl}" target="_blank">🗺 Google マップで号数・詳細を確認する</a>
+    ${routeCards}
+    <div class="src">データ: NAVITIME</div>
+  </div>
+</body></html>`;
+
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  setTimeout(() => URL.revokeObjectURL(url), 120000);
+  return url;
+}
+async function fetchRoute(fromStation, toStation, departureTime = null, departureDate = 'today') {
+  // 所要時間フォーマット: 165 → "2時間45分"
+  const fmtMin = m => {
+    if (m == null || isNaN(m)) return '不明';
+    const h = Math.floor(m / 60), mn = m % 60;
+    if (h > 0 && mn > 0) return `${h}時間${mn}分`;
+    if (h > 0) return `${h}時間`;
+    return `${mn}分`;
+  };
+  // 新幹線路線名テーブル
+  const SHINKANSEN_LINE = {
+    'のぞみ':'東海道新幹線','ひかり':'東海道新幹線','こだま':'東海道新幹線',
+    'みずほ':'山陽新幹線','さくら':'山陽新幹線','つばめ':'九州新幹線',
+    'はやぶさ':'東北新幹線','はやて':'東北新幹線','やまびこ':'東北新幹線','なすの':'東北新幹線',
+    'つばさ':'山形新幹線','こまち':'秋田新幹線',
+    'かがやき':'北陸新幹線','はくたか':'北陸新幹線','つるぎ':'北陸新幹線','あさま':'北陸新幹線',
+    'とき':'上越新幹線','たにがわ':'上越新幹線'
+  };
+  const navKey = getNavitimeKey();
+  if (!navKey) return { text: 'NAVITIME APIキーが未設定です。接続前にNAVITIMEキー欄に入力してください。', blobUrl: null, gmapsFallback: null };
+
+  // タイムアウト付きfetch（Geminiのtoolレスポンス待ち時間内に収める）
+  const fetchWithTimeout = (fetchUrl, options = {}, ms = 8000) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    return fetch(fetchUrl, { ...options, signal: ctrl.signal })
+      .finally(() => clearTimeout(timer));
+  };
+
+  // ① 出発地・目的地をジオコーディング（並列・タイムアウト付き）
+  let fromLoc, toLoc;
+  try {
+    [fromLoc, toLoc] = await Promise.all([
+      geocodeStation(fromStation, fetchWithTimeout),
+      geocodeStation(toStation,   fetchWithTimeout)
+    ]);
+  } catch (e) {
+    return { text: `位置情報の取得に失敗しました: ${e.message}`, blobUrl: null, gmapsFallback: null };
+  }
+
+  // ② 出発日時を JST の ISO 8601 文字列に変換
+  //    departure_time が指定されていれば その時刻を使用、なければ現在時刻
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 3600 * 1000);
+  let startTime;
+  if (departureTime && /^\d{1,2}:\d{2}$/.test(departureTime)) {
+    // 指定時刻: 今日 or 明日の日付 + 指定時刻
+    const baseDate = jst.toISOString().slice(0, 10); // YYYY-MM-DD (JST)
+    let [yyyy, mm, dd] = baseDate.split('-').map(Number);
+    if (departureDate === 'tomorrow') {
+      const d = new Date(Date.UTC(yyyy, mm - 1, dd + 1));
+      yyyy = d.getUTCFullYear(); mm = d.getUTCMonth() + 1; dd = d.getUTCDate();
+    }
+    const pad2 = n => String(n).padStart(2, '0');
+    startTime = `${yyyy}-${pad2(mm)}-${pad2(dd)}T${departureTime}:00`;
+  } else {
+    startTime = jst.toISOString().slice(0, 19);
+  }
+
+  // ③ NAVITIME ルート検索
+  // ※ Content-Type は GET リクエストに不要 → CORS プリフライトを回避するため除去
+  const params = new URLSearchParams({
+    start:      `${fromLoc.lat},${fromLoc.lng}`,
+    goal:       `${toLoc.lat},${toLoc.lng}`,
+    datum:      'wgs84',
+    term:       '1440',
+    limit:      '5',
+    start_time: startTime,
+    coord_unit: 'degree'
+  });
+
+  const navUrl = `https://navitime-route-totalnavi.p.rapidapi.com/route_transit?${params}`;
+  let resp;
+  try {
+    resp = await fetchWithTimeout(navUrl, {
+      method: 'GET',
+      headers: {
+        'x-rapidapi-host': 'navitime-route-totalnavi.p.rapidapi.com',
+        'x-rapidapi-key':  navKey
+      }
+    }, 10000);
+  } catch (e) {
+    const msg = e.name === 'AbortError' ? 'タイムアウト（10秒）' : e.message;
+    return { text: `NAVITIME通信エラー: ${msg}。localhost環境ではCORSの問題が発生する場合があります。`, blobUrl: null, gmapsFallback: null };
+  }
+
+  // ④ レスポンス解析（JSON以外が返ってくる場合も安全に処理）
+  let data;
+  try {
+    data = await resp.json();
+  } catch (e) {
+    return { text: 'NAVITIMEのレスポンスが不正です（JSONではありません）。APIキーを確認してください。', blobUrl: null, gmapsFallback: null };
+  }
+  console.info('[NAVITIME route] status:', resp.status, 'body:', JSON.stringify(data).slice(0, 400));
+
+  if (!resp.ok) {
+    const errMsg = data?.message || data?.error || `HTTP ${resp.status}`;
+    return { text: `NAVITIME APIエラー: ${errMsg}`, blobUrl: null, gmapsFallback: null };
+  }
+
+  const allItems = data.items || [];
+  // 空路除外: move タイプが train/walk/bus/transfer 以外のセクションを含むルートを除外
+  // 空路検出: 明示的な空路指標のみ（未知のmove型を誤判定しない）
+  const hasAir = item => (item.sections || []).some(sec => {
+    const m = (sec.move || '').toLowerCase();
+    const t = (sec.transport?.name || '');
+    if (t.includes('空路')) return true;                       // 日本語「空路」
+    if (/航空|エアライン/i.test(t)) return true;              // 航空・エアライン
+    if (/airdo|skymark|peach|jetstar|starflyer|solaseed/i.test(t)) return true; // LCC名
+    if (/^(ana|jal|ibex|air do)$/i.test(t.trim())) return true; // 航空会社略称（完全一致）
+    if (m === 'airplane' || m === 'plane' || m === 'air') return true;
+    return false;  // 新幹線・特急など未知のmove型は地上交通として扱う
+  });
+  const trainItems = allItems.filter(item => !hasAir(item));
+  if (trainItems.length === 0) {
+    return { text: `${fromStation}から${toStation}へは現在の時間帯に鉄道ルートが見つかりませんでした。出発時刻を変更するか、Google マップでご確認ください。`, routeLines: [], routeData: [] };
+  }
+  const items = trainItems.slice(0, 3);
+  if (!items.length) return { text: `${fromStation}から${toStation}へのルートが見つかりませんでした。`, blobUrl: null, gmapsFallback: null };
+
+  // ⑤ ISO 8601 → HH:MM 変換ヘルパー
+  const toHHMM = t => {
+    if (!t) return '';
+    // "2026-05-04T18:47:00+09:00" → "18:47"
+    if (t.includes('T')) return t.split('T')[1].slice(0, 5);
+    // "18:47:00" → "18:47"
+    return t.slice(0, 5);
+  };
+
+  // ⑥ ルートを日本語に整形（Geminiへ渡す文字列を簡潔に保つ）
+  const routeLines = items.slice(0, 3).map((item, idx) => {
+    const s    = item.summary || {};
+    const move = s.move || {};
+    const fare = move.fare?.unit_0 ?? move.fare?.unit_1 ?? '不明';
+    const dep  = toHHMM(s.from?.time || '');
+    const arr  = toHHMM(s.to?.time  || '');
+    // 所要時間: move.time は待ち時間込みのため、出発〜到着時刻から乗車時間を計算
+    const calcMinutes = (d, a) => {
+      if (!d || !a) return null;
+      const [dh, dm] = d.split(':').map(Number);
+      const [ah, am] = a.split(':').map(Number);
+      const diff = (ah * 60 + am) - (dh * 60 + dm);
+      return diff >= 0 ? diff : diff + 1440; // 日をまたぐ場合の補正
+    };
+    const rideMin = calcMinutes(dep, arr);
+    const time = rideMin != null ? fmtMin(rideMin) : (move.time != null ? fmtMin(move.time) : '不明');
+
+    const trains = (item.sections || [])
+      .filter(sec => sec.type === 'move' && sec.move !== 'walk')
+      .map(sec => {
+        const tName = sec.transport?.name || '電車';
+        const tNum  = sec.transport?.number || sec.transport?.code || '';
+        const tLine = SHINKANSEN_LINE[tName] ? `${SHINKANSEN_LINE[tName]}・` : '';
+        const tDisp = tLine + tName + (tNum ? `${tNum}号` : '');
+        const dir   = sec.transport?.direction ? `(${sec.transport.direction})` : '';
+        const ft    = toHHMM(sec.from_time);
+        const tt    = toHHMM(sec.to_time);
+        return `${sec.from_name || ''}${ft ? ft + '発' : ''}→[${tDisp}${dir}]→${sec.to_name || ''}${tt ? tt + '着' : ''}`;
+      }).join('|乗換|');
+
+    const fareStr = fare !== '不明' ? `${fare}円` : '運賃不明';
+    return `ルート${idx + 1}: 所要${time} ${fareStr} (${dep}→${arr}) ${trains}`;
+  });
+
+  const text = `${fromStation}→${toStation}: ${routeLines.join(' / ')}`;
+
+  // ⑦ 構造化データ（Blobカード用）─ サマリーの from/to name + セクション時刻を利用
+  const routeData = items.slice(0, 3).map((item) => {
+    const s2    = item.summary || {};
+    const move2 = s2.move || {};
+    const fare2 = move2.fare?.unit_0 ?? move2.fare?.unit_1 ?? null;
+
+    const fromName2 = s2.from?.name || fromStation;
+    const toName2   = s2.to?.name   || toStation;
+
+    // 時刻: サマリー優先 → 先頭/末尾セクションで補完
+    const allMoves  = (item.sections || []).filter(s => s.type === 'move');
+    const firstSec  = allMoves[0];
+    const lastSec   = allMoves[allMoves.length - 1];
+    const dep2 = toHHMM(s2.from?.time || firstSec?.from_time || '');
+    const arr2 = toHHMM(s2.to?.time   || lastSec?.to_time    || '');
+
+    const calcMin2 = (d, a) => {
+      if (!d || !a) return null;
+      const [dh, dm] = d.split(':').map(Number);
+      const [ah, am] = a.split(':').map(Number);
+      const diff = (ah * 60 + am) - (dh * 60 + dm);
+      return diff >= 0 ? diff : diff + 1440;
+    };
+    const rideMin2 = calcMin2(dep2, arr2);
+    const dur2 = rideMin2 != null ? fmtMin(rideMin2) : (move2.time != null ? fmtMin(move2.time) : '不明');
+
+    // 全セクション（walk含む）の時刻→駅名マップを作成（中間駅補完用）
+    const allSecsForMap = item.sections || [];
+    const timeToStn = {};
+    const isRealName = s => s && s.trim().length > 0 && !/^\d+$/.test(s.trim());
+    allSecsForMap.forEach(sec => {
+      const fn = (sec.from_name || '').trim();
+      const tn = (sec.to_name   || '').trim();
+      const ft2 = toHHMM(sec.from_time);
+      const tt2 = toHHMM(sec.to_time);
+      if (isRealName(fn) && ft2) timeToStn[ft2] = fn;
+      if (isRealName(tn) && tt2) timeToStn[tt2] = tn;
+    });
+
+    const trainSecs = allSecsForMap.filter(s => s.type === 'move' && s.move !== 'walk');
+    const segments2 = trainSecs.map((sec, si) => {
+      const ft = toHHMM(sec.from_time);
+      const tt = toHHMM(sec.to_time);
+      const rawFrom = isRealName(sec.from_name) ? sec.from_name.trim() : '';
+      const rawTo   = isRealName(sec.to_name)   ? sec.to_name.trim()   : '';
+
+      const fromStn = rawFrom
+                   || timeToStn[ft]
+                   || (si === 0 ? fromName2 : '');
+
+      // 中間到着駅: 時刻マップ → 最終駅サマリー → 方面ヒューリスティック("XX方面"→"XX")
+      const dirStation = sec.transport?.direction
+                           ? sec.transport.direction.replace(/方面$/, '').trim() : '';
+      const toStn = rawTo
+                 || timeToStn[tt]
+                 || (si === trainSecs.length - 1 ? toName2 : '')
+                 || (si < trainSecs.length - 1 ? dirStation : '');
+
+      const trainName = sec.transport?.name || '電車';
+      const trainNum  = sec.transport?.number || sec.transport?.code || '';
+      const shinLine  = SHINKANSEN_LINE[trainName] ? `${SHINKANSEN_LINE[trainName]}` : '';
+      const dir = sec.transport?.direction ? `（${sec.transport.direction}）` : '';
+      const line = (shinLine ? shinLine + ' ' : '') + trainName + (trainNum ? `${trainNum}号` : '') + dir;
+
+      return { fromStn, ft, line, toStn, tt };
+    });
+
+    return { fromName: fromName2, toName: toName2, dep: dep2, arr: arr2, duration: dur2, fare: fare2, segments: segments2 };
+  });
+
+  return { text, routeLines, routeData };
+}
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  音声再生
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function ensurePlayCtx() {
+  if (!playCtx || playCtx.state === 'closed') {
+    playCtx  = new AudioContext({ sampleRate: OUT_RATE });
+    nextPlayAt = 0;
+  }
+  if (playCtx.state === 'suspended') playCtx.resume();
+  return playCtx;
+}
+
+
+function playPcmChunk(base64) {
+  if (!voiceOn) return;
+  try {
+    const ctx = ensurePlayCtx();
+    // base64 → Uint8 → Int16 → Float32
+    const raw = atob(base64);
+    const u8  = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) u8[i] = raw.charCodeAt(i);
+    const i16 = new Int16Array(u8.buffer);
+    const f32 = new Float32Array(i16.length);
+    for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768.0;
+
+    const buf = ctx.createBuffer(1, f32.length, OUT_RATE);
+    buf.getChannelData(0).set(f32);
+
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    const t   = Math.max(now + 0.01, nextPlayAt);
+    src.start(t);
+    nextPlayAt = t + buf.duration;
+  } catch (e) {
+    console.warn('[play]', e);
+  }
+}
+
+function stopPlayback() {
+  if (playCtx) {
+    try { playCtx.close(); } catch {}
+    playCtx    = null;
+    nextPlayAt = 0;
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  音声キャプチャ
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function startCapture() {
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation : true,
+        noiseSuppression : true,
+        autoGainControl  : true,
+        channelCount     : 1
+      }
+    });
+  } catch (e) {
+    appendBubble(`マイクへのアクセスに失敗しました: ${e.message}`, 'system');
+    return;
+  }
+
+  // 16kHz AudioContext
+  captureCtx = new AudioContext({ sampleRate: IN_RATE });
+  const source = captureCtx.createMediaStreamSource(mediaStream);
+  scriptProc   = captureCtx.createScriptProcessor(4096, 1, 1);
+
+  scriptProc.onaudioprocess = e => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const f32 = e.inputBuffer.getChannelData(0);
+    const i16 = new Int16Array(f32.length);
+    for (let i = 0; i < f32.length; i++) {
+      i16[i] = Math.max(-32768, Math.min(32767, Math.round(f32[i] * 32767)));
+    }
+    micBuffer.push(i16);
+  };
+
+  source.connect(scriptProc);
+  scriptProc.connect(captureCtx.destination); // ScriptProcessor は接続が必要
+
+  // AudioContext が suspended になっていたら再開（ブラウザの自動停止対策）
+  if (captureCtx.state === 'suspended') {
+    await captureCtx.resume();
+  }
+  console.info('[capture] AudioContext state:', captureCtx.state, 'sampleRate:', captureCtx.sampleRate);
+  // 定期送信
+  flushTimer = setInterval(flushMicChunks, FLUSH_MS);
+
+  // Speech Recognition（AIが話していない間だけ動作）
+}
+
+
+// base64 変換 (大バッファ対応)
+function uint8ToBase64(u8) {
+  const CHUNK = 8192;
+  let s = '';
+  for (let i = 0; i < u8.length; i += CHUNK) {
+    s += String.fromCharCode(...u8.subarray(i, Math.min(i + CHUNK, u8.length)));
+  }
+  return btoa(s);
+}
+
+function flushMicChunks() {
+  if (!ws || ws.readyState !== WebSocket.OPEN || micBuffer.length === 0) return;
+  const total = micBuffer.reduce((s, c) => s + c.length, 0);
+  const merged = new Int16Array(total);
+  let offset = 0;
+  for (const c of micBuffer) { merged.set(c, offset); offset += c.length; }
+  micBuffer = [];
+
+  const b64 = uint8ToBase64(new Uint8Array(merged.buffer));
+  ws.send(JSON.stringify({
+    realtimeInput: {
+      audio: { data: b64, mimeType: `audio/pcm;rate=${IN_RATE}` }
+    }
+  }));
+}
+
+function stopCapture() {
+  if (flushTimer)  { clearInterval(flushTimer); flushTimer = null; }
+  aiTalking = false;
+  if (scriptProc)  { try { scriptProc.disconnect(); } catch {} scriptProc = null; }
+  if (captureCtx)  { try { captureCtx.close();     } catch {} captureCtx = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  micBuffer = [];
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  WebSocket / Gemini Live
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ── APIキー事前検証（REST） ───────────────────────────────
+async function validateApiKey(apiKey) {
+  setStatus('APIキー確認中…');
+
+  // ページネーションで全モデルを取得
+  let allModels = [];
+  let pageToken = '';
+  for (let page = 0; page < 5; page++) {
+    const qs = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=50${qs}`;
+    let resp;
+    try {
+      resp = await fetch(url);
+    } catch (e) {
+      throw new Error('ネットワークエラー: インターネット接続を確認してください。');
+    }
+    if (resp.status === 400 || resp.status === 401) {
+      throw new Error('APIキーが無効です。AI Studio で正しいキーをコピーし直してください。');
+    }
+    if (resp.status === 403) {
+      throw new Error(
+        'APIキーに権限がありません（HTTP 403）\n\n' +
+        '確認事項:\n' +
+        '① APIキーと請求先（Billing）が同じプロジェクトにあるか\n' +
+        '② Google Cloud Console で「Generative Language API」が有効か\n' +
+        '③ APIキーの「APIの制限」で制限されていないか'
+      );
+    }
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(`APIエラー (${resp.status}): ${body.error?.message || '不明なエラー'}`);
+    }
+    const data = await resp.json();
+    allModels = allModels.concat(data.models || []);
+    if (data.nextPageToken) {
+      pageToken = data.nextPageToken;
+    } else {
+      break;
+    }
+  }
+
+  // Live API 対応モデルを探す
+  const liveModels = allModels
+    .filter(m => m.supportedGenerationMethods?.includes('bidiGenerateContent'))
+    .map(m => m.name);
+  console.info('[validateApiKey] 全モデル数:', allModels.length, 'Live対応:', liveModels);
+
+  // モデル候補から使えるものを選択
+  const found = MODEL_CANDIDATES.find(c => liveModels.includes(c));
+  if (found) MODEL = found;
+  else if (liveModels.length > 0) MODEL = liveModels[0];
+
+  if (liveModels.length === 0) {
+    throw new Error(
+      `このAPIキーではGemini Live APIが使用できません。\n取得モデル数: ${allModels.length}件\n\n` +
+      '考えられる原因:\n' +
+      '① APIキーと請求先（Billing）が別プロジェクトにある\n' +
+      '② Billingを有効化したばかりで反映待ち（5〜30分）\n' +
+      '③ 「Generative Language API」が未有効\n\n' +
+      '→ console.cloud.google.com で\n  APIキーのプロジェクトとBilling設定を確認してください。'
+    );
+  }
+
+  console.info('[モデル一覧]', liveModels);
+  // 接続開始メッセージはシンプルに
+  // appendBubble(`接続中… (${MODEL.split('/').pop()})`, 'system');  // GitHub公開用に非表示
+  return true;
+}
+
+
+// ── WebSocket 接続 ────────────────────────────────────────
+function connect(apiKey) {
+  const url = `${WS_BASE}?key=${encodeURIComponent(apiKey)}`;
+  ws = new WebSocket(url);
+  setStatus('接続中…');
+
+  ws.onopen = () => {
+    // セットアップメッセージ送信
+    // ネイティブ音声モデルは speechConfig なしの最小構成で接続
+    const isNativeAudio = MODEL.includes('native-audio');
+    // generationConfig を構築
+    const genConfig = { responseModalities: ['AUDIO'] };
+    if (!isNativeAudio) {
+      genConfig.speechConfig = {
+        voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } }
+      };
+    }
+    const setupMsg = {
+      setup: {
+        model: MODEL,
+        generationConfig: genConfig,
+        // カスタム関数宣言（天気取得）
+        // ※ Googleの組み込み検索グラウンディングは Live API 未サポートだが
+        //   自前の functionDeclarations は使用可能
+        tools: [{
+          functionDeclarations: [{
+            name: 'get_current_weather',
+            description: '指定した都市の天気情報を取得します。「今日の天気」「明日の天気」「天気は？」など天気に関する質問では必ずこのツールを呼び出してください。',
+            parameters: {
+              type: 'OBJECT',
+              properties: {
+                location: {
+                  type: 'STRING',
+                  description: '都市名（例: 東京、大阪、札幌）'
+                },
+                date: {
+                  type: 'STRING',
+                  description: '取得する日付。"today"（今日）または "tomorrow"（明日）。省略時は今日。',
+                  enum: ['today', 'tomorrow']
+                }
+              },
+              required: ['location']
+            }
+          }, {
+            name: 'get_current_datetime',
+            description: '現在の日付・時刻・曜日を取得します。「今何時？」「今日は何日？」「今日は何曜日？」など日時に関する質問では必ずこのツールを呼び出してください。',
+            parameters: { type: 'OBJECT', properties: {} }
+          }, {
+            name: 'get_train_status',
+            description: '電車・地下鉄の運行状況（遅延・運休・平常運転）をリアルタイムで取得します。「山手線は動いてる？」「電車遅れてる？」「〇〇線の運行情報は？」など交通情報に関する質問で使用してください。',
+            parameters: {
+              type: 'OBJECT',
+              properties: {
+                railway: {
+                  type: 'STRING',
+                  description: '路線名（例: 山手線、銀座線、都営大江戸線）。全路線の確認は省略可能。'
+                }
+              }
+            }
+          }, {
+            name: 'get_next_trains',
+            description: '指定した駅の次の電車の発車時刻を取得します。「次の電車は何時？」「〇〇駅の時刻表は？」など時刻に関する質問で使用してください。',
+            parameters: {
+              type: 'OBJECT',
+              properties: {
+                station: {
+                  type: 'STRING',
+                  description: '出発駅名（例: 渋谷、新宿、東京）'
+                },
+                to_station: {
+                  type: 'STRING',
+                  description: '目的地の駅名（わかっている場合）。省略可能。'
+                },
+                railway: {
+                  type: 'STRING',
+                  description: '路線名（複数路線がある駅の場合に指定）。省略可能。'
+                }
+              },
+              required: ['station']
+            }
+          }, {
+            name: 'get_places',
+            description: 'レストラン・カフェ・観光スポット・施設など場所やお店を検索します。「おすすめのお店は？」「近くの〇〇は？」「△△エリアの□□屋を教えて」など場所・店舗に関する質問では必ずこのツールを呼び出してください。',
+            parameters: {
+              type: 'OBJECT',
+              properties: {
+                query: {
+                  type: 'STRING',
+                  description: '検索クエリ（例: 新宿 天ぷら, 渋谷 カフェ, 東京駅 ラーメン, 浅草 観光スポット）'
+                }
+              },
+              required: ['query']
+            }
+          }, {
+            name: 'get_route',
+            description: '出発駅から目的駅への路線・乗り換え案内を取得します。「〇〇から●●まで行きたい」「乗り換えを教えて」「〇〇駅から●●駅の行き方」など移動ルートに関する質問では必ずこのツールを呼び出してください。出発時刻・日付が指定された場合は departure_time と departure_date も必ず設定してください。',
+            parameters: {
+              type: 'OBJECT',
+              properties: {
+                from_station: {
+                  type: 'STRING',
+                  description: '出発駅名（例: 新宿、東京、渋谷）'
+                },
+                to_station: {
+                  type: 'STRING',
+                  description: '目的駅名（例: 池袋、横浜、品川）'
+                },
+                departure_time: {
+                  type: 'STRING',
+                  description: '出発時刻。"HH:MM"形式（例: "08:00", "14:30"）。省略時は現在時刻。'
+                },
+                departure_date: {
+                  type: 'STRING',
+                  description: '出発日。"today"（今日）または "tomorrow"（明日）。省略時は今日。',
+                  enum: ['today', 'tomorrow']
+                }
+              },
+              required: ['from_station', 'to_station']
+            }
+          }, {
+            name: 'search_web',
+            description: '最新情報・時事情報・現在の営業状況・今年の開催日程など、自分の学習データでは正確に答えられない時事性のある情報を検索します。歴史的事実・一般知識・文化・地理など既知の情報はツールを使わず直接回答してください。',
+            parameters: {
+              type: 'OBJECT',
+              properties: {
+                query: {
+                  type: 'STRING',
+                  description: '検索クエリ（例: 浅草 祭り 2025, 東京 花火大会, 京都 紅葉 見頃）'
+                }
+              },
+              required: ['query']
+            }
+          }]
+        }],
+        // 音声の文字起こし（届けばバブルに表示、届かなくても無害）
+        outputAudioTranscription: {},
+        inputAudioTranscription:  {},
+        systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] }
+      }
+    };
+    console.info('[setup] モデル:', MODEL, 'isNativeAudio:', isNativeAudio, 'config:', JSON.stringify(genConfig));
+    ws.send(JSON.stringify(setupMsg));
+  };
+
+  // Gemini Live API はメッセージを Blob で送ってくることがある
+  ws.binaryType = 'blob';
+  let setupTimer = setTimeout(() => {
+    if (statusEl.textContent === '接続中…') {
+      appendBubble('⏱ タイムアウト: 15秒待ってもサーバーから応答がありませんでした。', 'system');
+      doDisconnect();
+    }
+  }, 15000);
+
+  ws.onmessage = async event => {
+    try {
+      const text = (event.data instanceof Blob) ? await event.data.text() : event.data;
+      const msg = JSON.parse(text);
+      // セットアップタイマーをクリア
+      if (msg.setupComplete !== undefined && setupTimer) {
+        clearTimeout(setupTimer);
+        setupTimer = null;
+      }
+      // エラーメッセージを表示
+      if (msg.error) {
+        appendBubble(`❌ サーバーエラー: ${msg.error.message || JSON.stringify(msg.error)}`, 'system');
+        doDisconnect();
+        return;
+      }
+      const topKeys = Object.keys(msg);
+      if (!topKeys.includes('serverContent') || Object.keys(msg.serverContent||{}).length) {
+        console.info('[msg]', topKeys, JSON.stringify(msg).slice(0,120));
+      }
+      handleServerMsg(msg);
+    } catch (e) {
+      console.warn('[ws.onmessage] parse error:', e, String(event.data).slice(0,50));
+    }
+  };
+
+  ws.onerror = e => {
+    console.error('[ws] error:', e);
+    // onclose が必ず続いて呼ばれるので、エラーログだけ残す
+  };
+
+  ws.onclose = e => {
+    console.warn('[ws] closed', e.code, e.reason);
+    if (statusEl.textContent === '未接続') return; // すでに切断済み
+    const msgs = {
+      1006: '⚠️ 接続が突然切れました（コード1006）\n\n考えられる原因:\n• APIキーに Live API の権限がない\n• ファイアウォールが WSS 接続をブロックしている\n• ブラウザの拡張機能が干渉している\n\n→ ブラウザのコンソール（F12）でエラーを確認してください。',
+      1008: sessionActive
+        ? '⚠️ セッションが終了しました（コード1008）\n\n会話中に接続が切れた主な原因:\n• セッション時間の上限（約10〜15分）に達した\n• サーバー側の一時的な制限\n\n→「切断」してから「会話開始」を押し直すと再開できます。'
+        : '⚠️ 接続が拒否されました（コード1008）\n\n【最も可能性が高い原因】\nGemini Live API は無料枠では使用できません。\nGoogle Cloud Console で請求先アカウント（Billing）を有効にする必要があります。\n\nその他の原因:\n• Generative Language API が有効でない\n• APIキーの利用制限\n\n対処手順:\n① console.cloud.google.com を開く\n② 「お支払い」→ クレジットカードを登録\n③ 「APIとサービス」→ Generative Language API を有効化\n④ 5分後に再試行',
+      1011: '⚠️ Geminiサーバーでエラーが発生しました（コード1011）\nしばらく待ってから再接続してください。',
+    };
+    const reason = e.reason ? `\n\n詳細: ${e.reason}` : '';
+    const base = msgs[e.code] || `⚠️ 切断されました（コード${e.code}）`;
+    const msg = base + reason;
+    appendBubble(msg, 'system');
+    doDisconnect();
+  };
+}
+
+async function handleServerMsg(msg) {
+  // ── セットアップ完了 ───────────────────────────────
+  if (msg.setupComplete !== undefined) {
+    sessionActive = true;
+    setStatus('接続済み');
+    startBtn.disabled   = true;
+    hangupBtn.disabled  = false;
+    textInputEl.disabled = false;
+    sendBtnEl.disabled  = false;
+    apiRowEl.style.display = 'none';
+
+    // APIキー状態の表示（GitHub公開用に非表示）
+    // const routeReady = !!getNavitimeKey();
+    // const statusParts = [...];
+    // appendBubble('APIキー状態: ...', 'system');
+
+    startCapture().then(() => {
+      // マイク準備完了後に挨拶トリガー
+      if (!isGreeted) {
+        isGreeted = true;
+        const sendGreeting = () => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              clientContent: {
+                turns: [{ role: 'user', parts: [{ text: '' }] }],
+                turnComplete: true
+              }
+            }));
+          }
+        };
+        sendGreeting();
+        // 4秒待っても音声バブルが出なければ挨拶を再送（1回のみ）
+        setTimeout(() => {
+          const bubbles = document.querySelectorAll('.bubble.ai');
+          if (bubbles.length === 0 && ws && ws.readyState === WebSocket.OPEN) {
+            console.info('[greeting] 再送');
+            sendGreeting();
+          }
+        }, 4000);
+      }
+    });
+    return;
+  }
+
+  // ── サーバーコンテンツ（AI応答）────────────────────
+  if (msg.serverContent) {
+    const sc = msg.serverContent;
+    // どんなキーが来ているか確認
+    const keys = Object.keys(sc);
+    if (keys.length) console.info('[serverContent keys]', keys);
+
+    // モデル応答パーツ
+    if (sc.modelTurn && sc.modelTurn.parts) {
+      for (const part of sc.modelTurn.parts) {
+          // 内部思考（thought）はスキップ
+          if (part.thought) continue;
+        // 音声データ
+        if (part.inlineData && part.inlineData.mimeType &&
+            part.inlineData.mimeType.startsWith('audio/pcm')) {
+          if (!aiTalking) {
+            aiTalking = true;
+            const b = ensureAiBubble();
+            // テキスト転写がまだ届いていない場合だけ🔊インジケーターをセット
+            if (b.dataset.state === 'empty') {
+              b.textContent = '🔊';
+              b.dataset.state = 'indicator';
+            }
+          }
+          playPcmChunk(part.inlineData.data);
+        }
+        // テキストデータ（モデルがテキストモダリティで返した場合）
+        if (typeof part.text === 'string' && part.text.length > 0) {
+          const b = ensureAiBubble();
+          if (b.dataset.state !== 'text') {
+            b.textContent = part.text;
+            b.dataset.state = 'text';
+          } else {
+            b.textContent += part.text;
+          }
+          scrollBottom();
+        }
+      }
+    }
+
+    // ユーザー音声の文字起こし（Geminiサーバーから）
+    if (sc.inputTranscription) {
+      const t = sc.inputTranscription.text || '';
+      console.info('[inputTranscription]', t);
+      if (t) {
+        if (!pendingUserBubble) pendingUserBubble = appendBubble('', 'user');
+        pendingUserBubble.textContent += t;
+        lastUserQuery += t;  // ターン内のユーザー発話を蓄積
+        scrollBottom();
+      }
+    }
+
+    // モデル音声の文字起こし（出力転写）
+    if (sc.outputTranscription) {
+      const t = (sc.outputTranscription.text || '').trim();
+      if (t) {
+        const b = ensureAiBubble();
+        if (b.dataset.state !== 'text') {
+          // 初回転写：インジケーター（🔊）または空を置き換え
+          b.textContent = t;
+          b.dataset.state = 'text';
+        } else {
+          // 追加転写：末尾に追記
+          b.textContent += t;
+        }
+        scrollBottom();
+      }
+    }
+
+    // ターン完了
+    if (sc.turnComplete) {
+      finishAiBubble();
+      // ツールが呼ばれたかどうかをこの時点で確定（inputTranscriptionより先に確認できる）
+      const _toolWasCalled = pendingLinks.length > 0;
+      const _isGreetedNow  = isGreeted;
+      // ツール呼び出し分のリンクはすぐ表示
+      if (pendingLinks.length > 0) {
+        pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
+        pendingLinks = [];
+      }
+      // ユーザー発言の誤変換補正（非同期・表示のみ更新）
+      if (pendingUserBubble) {
+        const _ub = pendingUserBubble;
+        const _raw = _ub.textContent.trim();
+        if (_raw.length >= 3) correctTranscription(_ub, _raw); // 非同期・fire-and-forget
+      }
+      // ユーザーバブルへの参照を保持しておく（inputTranscriptionが遅れて届く場合があるため）
+      const _savedUserBubble = pendingUserBubble;
+      pendingUserBubble = null;
+      // ツールが呼ばれなかった場合: 500ms後にユーザーテキストを取得してGoogle検索リンクを追加
+      // （inputTranscription が turnComplete より遅れて届くことがあるため遅延実行）
+      if (!_toolWasCalled && _isGreetedNow && !googleLinkScheduled) {
+        googleLinkScheduled = true;  // 重複スケジュール防止
+        setTimeout(() => {
+          // DOMの最後のユーザーバブルから直接テキストを取得（最も確実）
+          const _allUserBubbles = chatEl.querySelectorAll('.row.user .bubble');
+          const _lastUserBubble = _allUserBubbles.length > 0 ? _allUserBubbles[_allUserBubbles.length - 1] : null;
+          const _uq = (_lastUserBubble ? _lastUserBubble.textContent.trim() : '') || lastUserQuery.trim();
+          if (_uq.length > 2) {
+            const gUrl = `https://www.google.com/search?q=${encodeURIComponent(_uq)}&hl=ja`;
+            appendBubbleWithLinks([{ text: `🔎 「${_uq}」をGoogleで検索する`, url: gUrl, embedUrl: null }], 'system');
+          }
+          lastUserQuery = '';
+          googleLinkScheduled = false;  // フラグをリセット
+        }, 800);
+      } else {
+        lastUserQuery = '';
+      }
+      const waitMs = Math.max(300, (nextPlayAt - (playCtx ? playCtx.currentTime : 0)) * 1000 + 500);
+      setTimeout(() => { aiTalking = false; }, waitMs);
+      setListening(true);
+    }
+
+    // ユーザー割り込み
+    if (sc.interrupted) {
+      stopPlayback();
+      finishAiBubble();
+      pendingUserBubble = null;
+      aiTalking = false;
+    }
+  }  // end if (msg.serverContent)
+
+  // ── ツール呼び出し ──────────────────────────────────
+  if (msg.toolCall) {
+    console.info('[toolCall]', JSON.stringify(msg.toolCall));
+    const calls = msg.toolCall.functionCalls || [];
+    const responses = [];
+    for (const call of calls) {
+      let output = '情報を取得できませんでした。';
+      try {
+        if (call.name === 'get_current_weather') {
+          appendBubble(`🌤 天気情報を取得中…（${call.args?.location}）`, 'system');
+          const wxResult = await fetchWeather(call.args?.location || '東京', call.args?.date || 'today');
+          output = wxResult.text;
+          console.info('[weather]', output);
+          // ターン完了後にGoogle天気リンクをキューに積む（直接新タブ）
+          if (output && !output.includes('失敗') && !output.includes('見つかりません')) {
+            const loc = call.args?.location || '東京';
+            const isTomorrow = (call.args?.date === 'tomorrow');
+            const weatherQuery = loc + (isTomorrow ? ' 明日 天気予報' : ' 天気');
+            const weatherLabel = isTomorrow ? '🌤 Googleで明日の天気を確認する' : '🌤 Googleで天気を確認する';
+            pendingLinks.push({
+              text: weatherLabel,
+              url: `https://www.google.co.jp/search?q=${encodeURIComponent(weatherQuery)}&hl=ja`,
+              embedUrl: null
+            });
+          }
+        } else if (call.name === 'get_current_datetime') {
+          const now = new Date();
+          const days = ['日','月','火','水','木','金','土'];
+          const pad = n => String(n).padStart(2, '0');
+          output = `現在の日時: ${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日（${days[now.getDay()]}）` +
+                   ` ${pad(now.getHours())}時${pad(now.getMinutes())}分${pad(now.getSeconds())}秒`;
+          console.info('[datetime]', output);
+        } else if (call.name === 'get_train_status') {
+          const trainLine = call.args?.railway || null;
+          appendBubble(`🚃 交通情報を取得中…`, 'system');
+          output = await fetchTrainStatus(trainLine);
+          console.info('[train]', output);
+          // 成否にかかわらず Yahoo路線情報リンクを常に表示
+          const yahooTrainUrl = trainLine
+            ? `https://transit.yahoo.co.jp/traininfo/top`
+            : `https://transit.yahoo.co.jp/traininfo/top`;
+          pendingLinks.push({ text: '🚃 Yahoo!路線情報で運行状況を確認する', url: yahooTrainUrl, embedUrl: null });
+          // ODPT失敗時はリンク誘導メッセージに差し替え
+          if (output && (output.includes('エラー') || output.includes('失敗') || output.includes('未設定') || output.includes('通信エラー'))) {
+            output = `運行情報の直接取得ができませんでした。リンクからYahoo!路線情報でご確認ください。`;
+          }
+        } else if (call.name === 'get_next_trains') {
+          const ntStation = call.args?.station || '';
+          const ntDest    = call.args?.to_station || '';
+          appendBubble(`🚃 時刻表を取得中…（${ntStation}駅）`, 'system');
+          // 常にリンクを表示（Yahoo時刻表 + Googleマップルート）
+          const ytUrl = `https://transit.yahoo.co.jp/search/result?from=${encodeURIComponent(ntStation)}&to=${encodeURIComponent(ntDest || ntStation)}&type=1`;
+          pendingLinks.push({ text: `🚃 Yahoo!乗換案内で${ntStation}駅の次の電車を確認する`, url: ytUrl, embedUrl: null });
+          if (ntDest) {
+            const gmUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(ntStation + '駅')}&destination=${encodeURIComponent(ntDest + '駅')}&travelmode=transit&hl=ja`;
+            pendingLinks.push({ text: `🗺 Google マップで${ntStation}→${ntDest}の乗換案内を見る`, url: gmUrl, embedUrl: null });
+          }
+          output = ntDest
+            ? `${ntStation}から${ntDest}への次の電車はリンクからご確認ください。`
+            : `${ntStation}駅の次の電車はリンクからご確認ください。`;
+          console.info('[timetable]', output);
+        } else if (call.name === 'get_places') {
+          const pQuery = call.args?.query || '';
+          appendBubble(`🔍 「${pQuery}」を検索中…`, 'system');
+          let placesRaw = '';
+          try { placesRaw = await fetchPlaces(pQuery); } catch(e) { placesRaw = ''; }
+          console.info('[places]', placesRaw);
+
+          // Places API の成否にかかわらず常に Google マップリンクを表示
+          pendingLinks.push({
+            text: '📍 Google マップで詳細を見る',
+            url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pQuery)}`,
+            embedUrl: null
+          });
+
+          const placesOk = placesRaw
+            && !placesRaw.includes('エラー')
+            && !placesRaw.includes('未設定')
+            && !placesRaw.includes('見つかりません')
+            && !placesRaw.includes('失敗');
+
+          if (placesOk) {
+            output = placesRaw;
+          } else {
+            // API 失敗時: Gemini に「リンクを表示した」と伝えてエラー発話を回避
+            output = `「${pQuery}」の検索リンクをご用意しました。詳しくはリンク先をご確認ください。`;
+          }
+        } else if (call.name === 'get_route') {
+          const rFrom = call.args?.from_station || '';
+          const rTo   = call.args?.to_station   || '';
+          appendBubble(`🗺 ルート検索中…（${rFrom} → ${rTo}）`, 'system');
+          // Googleマップ乗換案内のみを案内（NAVITIMEカードは非表示）
+          const gmFallbackUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(rFrom + '駅')}&destination=${encodeURIComponent(rTo + '駅')}&travelmode=transit&hl=ja`;
+          pendingLinks.push({ text: `🗺 Google マップで乗換案内を見る（${rFrom}→${rTo}）`, url: gmFallbackUrl, embedUrl: null });
+          output = `${rFrom}から${rTo}のルートをGoogleマップでご案内します。リンクからご確認ください。`;
+          console.info('[route] google maps only mode:', output);
+        } else if (call.name === 'search_web') {
+          const q = call.args?.query || '';
+          appendBubble(`🔎 「${q}」を検索中…`, 'system');
+          output = `「${q}」の検索結果リンクを表示しました。詳しくはリンク先をご参照ください。`;
+          const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(q)}&hl=ja`;
+          pendingLinks.push({
+            text: `🔎 「${q}」をGoogleで検索する`,
+            url: searchUrl,
+            embedUrl: null
+          });
+        }
+      } catch (e) {
+        output = `天気情報の取得に失敗しました: ${e.message}`;
+        console.warn('[toolCall error]', e);
+      }
+      responses.push({ id: call.id, name: call.name, response: { output } });
+    }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
+    }
+  }
+}
+
+
+// ──────────────────────────────────────────────────
+//  ユーザー発言の誤変換を Gemini REST API で補正
+// ──────────────────────────────────────────────────
+async function correctTranscription(bubbleEl, rawText) {
+  if (!rawText || rawText.trim().length < 3) return; // 短すぎる場合はスキップ
+  const key = apiKeyEl.value.trim() || localStorage.getItem(STORAGE_KEY) || '';
+  if (!key) return;
+  try {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${encodeURIComponent(key)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text:
+            `以下は日本語の音声認識（自動文字起こし）の結果です。誤変換・誤字があれば修正し、正しい日本語1文だけを返してください。説明・引用符・記号は不要です。\n音声認識結果: ${rawText.trim()}`
+          }]}],
+          generationConfig: { maxOutputTokens: 80, temperature: 0.0 }
+        })
+      }
+    );
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const corrected = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (corrected && corrected !== rawText.trim() && corrected.length > 0 && corrected.length < rawText.length * 3) {
+      // 修正前テキストをtooltipとして残し、表示を更新
+      bubbleEl.textContent = corrected;
+      bubbleEl.title = `音声認識: ${rawText.trim()}`;
+      bubbleEl.style.borderBottom = '1.5px dashed #9e9e9e';
+      scrollBottom();
+      console.info('[correction]', rawText, '→', corrected);
+    }
+  } catch (e) {
+    // サイレントエラー（補正失敗時は元テキストのまま）
+    console.warn('[correction error]', e.message);
+  }
+}
+
+// テキストメッセージ送信
+function sendToGemini(text) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({
+    clientContent: {
+      turns: [{ role: 'user', parts: [{ text }] }],
+      turnComplete: true
+    }
+  }));
+}
+
+function doDisconnect() {
+  stopCapture();
+  stopPlayback();
+  if (ws) { try { ws.close(); } catch {} ws = null; }
+  startBtn.disabled    = false;
+  hangupBtn.disabled   = true;
+  textInputEl.disabled = true;
+  sendBtnEl.disabled   = true;
+  pendingBubble        = null;
+  pendingLinks          = [];
+  isGreeted            = false;
+  sessionActive        = false;
+  googleLinkScheduled  = false;
+  lastUserQuery        = '';
+  apiRowEl.style.display = '';
+  setStatus('未接続');
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  テキスト送信
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function sendText() {
+  const text = textInputEl.value.trim();
+  if (!text) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    appendBubble('接続されていません。先に「会話開始」を押してください。', 'system');
+    return;
+  }
+  appendBubble(text, 'user');
+  sendToGemini(text);
+  textInputEl.value = '';
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  音声オン/オフ
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function setVoice(on) {
+  voiceOn = on;
+  voiceSwitchEl.classList.toggle('on', on);
+  voiceSwitchEl.setAttribute('aria-checked', String(on));
+  voiceLabelEl.textContent = on ? '音声オン' : '音声オフ';
+  if (!on) stopPlayback();
+  // マイクも連動
+  if (mediaStream) {
+    mediaStream.getAudioTracks().forEach(t => { t.enabled = on; });
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  イベントリスナー
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+startBtn.addEventListener('click', async () => {
+  const key = apiKeyEl.value.trim();
+  if (!key) {
+    alert('Gemini API キーを入力してください。\nGoogle AI Studio (https://aistudio.google.com) で取得できます。');
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, key);
+  const navitimeKey = document.getElementById('navitimeKey').value.trim();
+  if (navitimeKey) localStorage.setItem(NAVITIME_STORAGE_KEY, navitimeKey);
+  const placesKey = document.getElementById('placesKey').value.trim();
+  if (placesKey) localStorage.setItem(PLACES_STORAGE_KEY, placesKey);
+  // AudioContext をユーザー操作中（クリックイベント内）に事前生成し
+  // 無音バッファを再生してブラウザのオートプレイ制限を確実に解除する
+  try {
+    const ctx = ensurePlayCtx();
+    const silentBuf = ctx.createBuffer(1, 1, ctx.sampleRate);
+    const silentSrc = ctx.createBufferSource();
+    silentSrc.buffer = silentBuf;
+    silentSrc.connect(ctx.destination);
+    silentSrc.start(0);
+  } catch (_) {}
+
+  startBtn.disabled = true;
+  try {
+    await validateApiKey(key);   // ① REST で認証チェック
+    connect(key);                // ② WebSocket 接続
+  } catch (err) {
+    appendBubble(`接続できませんでした:\n${err.message}`, 'system');
+    startBtn.disabled = false;
+    setStatus('未接続');
+  }
+});
+
+hangupBtn.addEventListener('click', doDisconnect);
+
+
+voiceSwitchEl.addEventListener('click', () => setVoice(!voiceOn));
+voiceSwitchEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setVoice(!voiceOn); }
+});
+
+sendBtnEl.addEventListener('click', sendText);
+textInputEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); sendText(); }
+});
+
+// スクロール追従
+new MutationObserver(scrollBottom).observe(chatEl, { childList: true, subtree: true, characterData: true });
+window.addEventListener('resize', scrollBottom);
+textInputEl.addEventListener('focus', scrollBottom);
+window.addEventListener('beforeunload', doDisconnect);
+</script>
+</body>
+</html>
