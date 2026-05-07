@@ -101,7 +101,7 @@
   <header>
     <div class="title">
       <span class="name">AIコンシェルジュ</span>
-      <span class="ver">Gemini</span>
+      <span class="ver">Gemini v3</span>
     </div>
   </header>
 
@@ -228,8 +228,11 @@ let flushTimer    = null;
 let isGreeted     = false;   // 挨拶済みフラグ
 let sessionActive = false;  // setupComplete後のセッション中フラグ
 let pendingLinks  = [];     // ターン完了後に表示するリンクキュー
+let delayedLinks      = [];  // 音声（吹き出し）完了後に表示するリンク待機キュー（v3）
+let linkFlushTimer    = null; // delayedLinks 表示タイマー（重複防止）
 let placesApiLinksAdded = false;  // Places APIが個別リンクを返したターンかどうか
 let lastUserQuery = '';     // 最後のユーザー発話テキスト（ツール未使用時のGoogle検索用）
+  lastInputWasText     = false;
 let googleLinkScheduled = false; // Google検索リンクの重複追加防止フラグ
 let greetingComplete  = false;   // 挨拶ターン完了後フラグ（最初のturnComplete後にtrue）
 let userSpokeInTurn   = false;   // そのターンで本物のinputTranscriptionを受信したか
@@ -388,6 +391,33 @@ function appendBubbleWithLinks(items, role) {
   scrollBottom();
   return b;
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// v3: 音声（吹き出し）完了後にリンクを表示する
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function scheduleLinkFlush(extraDelayMs = 0) {
+  if (linkFlushTimer) { clearTimeout(linkFlushTimer); linkFlushTimer = null; }
+  if (!delayedLinks || delayedLinks.length === 0) return;
+
+  // 残り音声再生時間を推定（AudioContext が無い / 音声OFF なら即時）
+  let remainMs = 0;
+  try {
+    if (voiceOn && playCtx && playCtx.state !== 'closed') {
+      const remainSec = Math.max(0, nextPlayAt - playCtx.currentTime);
+      remainMs = Math.ceil(remainSec * 1000);
+    }
+  } catch (_) { remainMs = 0; }
+
+  const delay = Math.max(0, remainMs) + Math.max(0, extraDelayMs);
+  linkFlushTimer = setTimeout(() => {
+    if (!delayedLinks || delayedLinks.length === 0) return;
+    // まとめて表示（順序保持）
+    delayedLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
+    delayedLinks = [];
+    linkFlushTimer = null;
+  }, delay);
+}
+
 
 // AI応答バブル（ストリーミング用）
 function ensureAiBubble() {
@@ -1592,25 +1622,24 @@ async function handleServerMsg(msg) {
       // ツールが呼ばれたかどうかをこの時点で確定（inputTranscriptionより先に確認できる）
       const _toolWasCalled = pendingLinks.length > 0;
       const _isGreetedNow  = greetingComplete;  // 挨拶ターン自体ではなく、その完了後に true になる
-      if (isGreeted && !greetingComplete) greetingComplete = true;  // 挨拶ターン完了をマーク
-      // ツール呼び出し分のリンクはすぐ表示
+      if (isGreeted && !greetingComplete) greetingComplete = true;  // 挨拶ターン完了をマーク      // v3: リンクは音声（吹き出し）完了後に表示
       if (pendingLinks.length > 0) {
-        pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
-        pendingLinks = [];
+        delayedLinks.push(...pendingLinks);
+        pendingLinks          = [];
+  delayedLinks          = [];
+  if (linkFlushTimer) { clearTimeout(linkFlushTimer); linkFlushTimer = null; }
       }
       // ユーザー発言の誤変換補正（非同期・表示のみ更新）
       if (pendingUserBubble) {
         const _ub = pendingUserBubble;
-        const _raw = _ub.textContent.trim();
-        // ★ 改善: テキスト入力時は音声認識補正をスキップ
+        const _raw = _ub.textContent.trim();        // ★ 改善: テキスト入力時は音声認識補正をスキップ
         if (_raw.length >= 3 && !lastInputWasText) correctTranscription(_ub, _raw);
       }
       // ユーザーバブルへの参照を保持しておく（inputTranscriptionが遅れて届く場合があるため）
       const _savedUserBubble = pendingUserBubble;
       pendingUserBubble = null;
       // ツールが呼ばれなかった場合: 500ms後にユーザーテキストを取得してGoogle検索リンクを追加
-      // （inputTranscription が turnComplete より遅れて届くことがあるため遅延実行）
-      if (!_toolWasCalled && _isGreetedNow && !googleLinkScheduled && (userSpokeInTurn || lastInputWasText)) {
+      // （inputTranscription が turnComplete より遅れて届くことがあるため遅延実行）      if (!_toolWasCalled && _isGreetedNow && !googleLinkScheduled && (userSpokeInTurn || lastInputWasText)) {
         googleLinkScheduled = true;  // 重複スケジュール防止
         const _linkDelayMs = lastInputWasText ? 100 : 800;  // ★ 改善: テキスト入力時は遅延短縮
         setTimeout(() => {
@@ -1627,17 +1656,19 @@ async function handleServerMsg(msg) {
 
           if (_uq.length > 2 && !_aiAskedQuestion) {
             const gUrl = `https://www.google.com/search?q=${encodeURIComponent(_uq)}&hl=ja`;
-            appendBubbleWithLinks([{ text: `🔎 「${_uq}」をGoogleで検索する`, url: gUrl, embedUrl: null }], 'system');
+            delayedLinks.push({ text: `🔎 「${_uq}」をGoogleで検索する`, url: gUrl, embedUrl: null });
+            scheduleLinkFlush(0);
           }
           lastUserQuery = '';
           googleLinkScheduled = false;  // フラグをリセット
-        }, _linkDelayMs);
+                }, _linkDelayMs);
       } else {
         lastUserQuery = '';
       }
       userSpokeInTurn = false;  // 次ターン用にリセット
-      lastInputWasText = false;  // 次ターン用にリセット
       const waitMs = Math.max(300, (nextPlayAt - (playCtx ? playCtx.currentTime : 0)) * 1000 + 500);
+      // v3: 音声再生が終わったタイミングでリンクを表示
+      scheduleLinkFlush(50);
       setTimeout(() => { micBuffer = []; aiTalking = false; }, waitMs);  // 再生完了後にバッファも捨てる
       setListening(true);
     }
@@ -1648,13 +1679,15 @@ async function handleServerMsg(msg) {
       finishAiBubble();
       pendingUserBubble = null;
       aiTalking = false;
+      // v3: 割り込み時はリンクを持ち越さない（誤リンク防止）
+      delayedLinks = [];
+      if (linkFlushTimer) { clearTimeout(linkFlushTimer); linkFlushTimer = null; }
     }
   }  // end if (msg.serverContent)
 
   // ── ツール呼び出し ──────────────────────────────────
   if (msg.toolCall) {
-    console.info('[toolCall]', JSON.stringify(msg.toolCall));
-    const calls = msg.toolCall.functionCalls || [];
+    console.info('[toolCall]', JSON.stringify(msg.toolCall));    const calls = msg.toolCall.functionCalls || [];
     // ★ 改善: 複数ツール呼び出しを Promise.all で並列実行
     const responses = await Promise.all(calls.map(async (call) => {
       let output = '情報を取得できませんでした。';
@@ -1780,15 +1813,14 @@ async function handleServerMsg(msg) {
       } catch (e) {
         output = `天気情報の取得に失敗しました: ${e.message}`;
         console.warn('[toolCall error]', e);
-      }
-      return { id: call.id, name: call.name, response: { output } };
+      }      return { id: call.id, name: call.name, response: { output } };
     }));
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
     }
-    // ★ 改善: ツール処理完了直後にリンクを即時表示（turnComplete を待たない）
+    // v3: ツールで得られたリンクは、音声（吹き出し）完了後に表示するため待機キューへ移動
     if (pendingLinks.length > 0) {
-      pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
+      delayedLinks.push(...pendingLinks);
       pendingLinks = [];
     }
   }
@@ -1860,7 +1892,6 @@ function doDisconnect() {
   sessionActive        = false;
   googleLinkScheduled  = false;
   lastUserQuery        = '';
-  lastInputWasText     = false;
   apiRowEl.style.display = '';
   setStatus('未接続');
 }
@@ -1943,6 +1974,8 @@ $('#clearChat').addEventListener('click', () => {
   pendingBubble     = null;
   pendingUserBubble = null;
   lastUserQuery     = '';
+  delayedLinks = [];
+  if (linkFlushTimer) { clearTimeout(linkFlushTimer); linkFlushTimer = null; }
 });
 
 
