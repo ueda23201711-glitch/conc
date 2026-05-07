@@ -1593,17 +1593,15 @@ async function handleServerMsg(msg) {
       const _toolWasCalled = pendingLinks.length > 0;
       const _isGreetedNow  = greetingComplete;  // 挨拶ターン自体ではなく、その完了後に true になる
       if (isGreeted && !greetingComplete) greetingComplete = true;  // 挨拶ターン完了をマーク
-      // ✅ v3：音声完了後にリンク表示
-if (pendingLinks.length > 0) {
-  const linksToShow = [...pendingLinks];
-  pendingLinks = [];
-
-  setTimeout(() => {
-    linksToShow.forEach(link =>
-      appendBubbleWithLinks([link], 'system')
-    );
-  }, waitMs);
-}
+      // ✅ v3: 音声完了後にリンク表示
+      if (pendingLinks.length > 0) {
+        const linksToShow = [...pendingLinks];
+        pendingLinks = [];
+        const _linkWaitMs = Math.max(300, (nextPlayAt - (playCtx ? playCtx.currentTime : 0)) * 1000 + 100);
+        setTimeout(() => {
+          linksToShow.forEach(link => appendBubbleWithLinks([link], 'system'));
+        }, _linkWaitMs);
+      }
       // ユーザー発言の誤変換補正（非同期・表示のみ更新）
       if (pendingUserBubble) {
         const _ub = pendingUserBubble;
@@ -1792,11 +1790,7 @@ if (pendingLinks.length > 0) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
     }
-    // ★ 改善: ツール処理完了直後にリンクを即時表示（turnComplete を待たない）
-    if (pendingLinks.length > 0) {
-      pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
-      pendingLinks = [];
-    }
+    // v3: リンクはturnComplete内で音声完了後に表示するため、ここでは表示しない
   }
 }
 
