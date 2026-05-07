@@ -1598,18 +1598,12 @@ if (pendingLinks.length > 0) {
   const linksToShow = [...pendingLinks];
   pendingLinks = [];
 
-  const waitMs = Math.max(
-    300,
-    (nextPlayAt - (playCtx ? playCtx.currentTime : 0)) * 1000 + 100
-  );
-
   setTimeout(() => {
     linksToShow.forEach(link =>
       appendBubbleWithLinks([link], 'system')
     );
   }, waitMs);
 }
-      }
       // ユーザー発言の誤変換補正（非同期・表示のみ更新）
       if (pendingUserBubble) {
         const _ub = pendingUserBubble;
