@@ -1593,14 +1593,10 @@ async function handleServerMsg(msg) {
       const _toolWasCalled = pendingLinks.length > 0;
       const _isGreetedNow  = greetingComplete;  // 挨拶ターン自体ではなく、その完了後に true になる
       if (isGreeted && !greetingComplete) greetingComplete = true;  // 挨拶ターン完了をマーク
-      // ✅ v3: 音声完了後にリンク表示
+      // ツール呼び出し分のリンクはすぐ表示
       if (pendingLinks.length > 0) {
-        const linksToShow = [...pendingLinks];
+        pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
         pendingLinks = [];
-        const _linkWaitMs = Math.max(300, (nextPlayAt - (playCtx ? playCtx.currentTime : 0)) * 1000 + 100);
-        setTimeout(() => {
-          linksToShow.forEach(link => appendBubbleWithLinks([link], 'system'));
-        }, _linkWaitMs);
       }
       // ユーザー発言の誤変換補正（非同期・表示のみ更新）
       if (pendingUserBubble) {
@@ -1790,7 +1786,7 @@ async function handleServerMsg(msg) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
     }
-    // v3: リンクはturnComplete内で音声完了後に表示するため、ここでは表示しない
+    // リンクは turnComplete 後（AIの返答の後）に表示するため、ここでは表示しない
   }
 }
 
