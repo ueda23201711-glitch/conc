@@ -467,10 +467,10 @@ function buildWeatherBlobUrl(card) {
        <div class="row-item"><span class="lbl">最低気温</span><span class="val">${card.tmin}°C</span></div>
        <div class="row-item"><span class="lbl">降水確率</span><span class="val">${card.rain}%</span></div>
        <div class="row-item"><span class="lbl">最大風速</span><span class="val">${card.wind} m/s</span></div>`
-    : `<div class="row-item"><span class="lbl">気温</span><span class="val">${card.temp}°C</span></div>
-       <div class="row-item"><span class="lbl">体感温度</span><span class="val">${card.feels}°C</span></div>
-       <div class="row-item"><span class="lbl">湿度</span><span class="val">${card.hum}%</span></div>
-       <div class="row-item"><span class="lbl">風速</span><span class="val">${card.wind} m/s</span></div>`;
+    : `<div class="row-item"><span class="lbl">最高気温</span><span class="val">${card.tmax}°C</span></div>
+       <div class="row-item"><span class="lbl">最低気温</span><span class="val">${card.tmin}°C</span></div>
+       <div class="row-item"><span class="lbl">降水確率</span><span class="val">${card.rain}%</span></div>
+       <div class="row-item"><span class="lbl">最大風速</span><span class="val">${card.wind} m/s</span></div>`;
   const html = `<!DOCTYPE html>
 <html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
@@ -508,7 +508,7 @@ function buildWeatherBlobUrl(card) {
 </body></html>`;
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  setTimeout(() => URL.revokeObjectURL(url), 300000);  // 5分間有効
   return url;
 }
 
@@ -549,7 +549,8 @@ async function fetchWeather(location, date = 'today') {
     const rain  = d.precipitation_probability_max[1];
     const wind  = Math.round(d.wind_speed_10m_max[1] * 10) / 10;
     const text  = `${name}（日本）の明日の天気予報: ${cond}、最高${tmax}°C／最低${tmin}°C、降水確率${rain}%、最大風速${wind}m/s`;
-    return { text, blobUrl: null };
+    const blobUrl = buildWeatherBlobUrl({ name, date: 'tomorrow', cond, tmax, tmin, rain, wind });
+    return { text, blobUrl };
   } else {
     // 今日の天気は日次予報（最高/最低/降水確率）で返す
     const wxUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
@@ -563,7 +564,8 @@ async function fetchWeather(location, date = 'today') {
     const rain  = d.precipitation_probability_max[0];
     const wind  = Math.round(d.wind_speed_10m_max[0] * 10) / 10;
     const text  = `${name}（日本）の今日の天気予報: ${cond}、最高${tmax}°C／最低${tmin}°C、降水確率${rain}%、最大風速${wind}m/s`;
-    return { text, blobUrl: null };
+    const blobUrl = buildWeatherBlobUrl({ name, date: 'today', cond, tmax, tmin, rain, wind });
+    return { text, blobUrl };
   }
 }
 
@@ -1664,15 +1666,13 @@ async function handleServerMsg(msg) {
           const wxResult = await fetchWeather(call.args?.location || '東京', call.args?.date || 'today');
           output = wxResult.text;
           console.info('[weather]', output);
-          // ターン完了後にGoogle天気リンクをキューに積む（直接新タブ）
-          if (output && !output.includes('失敗') && !output.includes('見つかりません')) {
-            const loc = call.args?.location || '東京';
+          // ターン完了後に天気カードリンクをキューに積む（Open-Meteoデータと一致）
+          if (wxResult.blobUrl && output && !output.includes('失敗') && !output.includes('見つかりません')) {
             const isTomorrow = (call.args?.date === 'tomorrow');
-            const weatherQuery = loc + (isTomorrow ? ' 明日 天気予報' : ' 天気');
-            const weatherLabel = isTomorrow ? '🌤 Googleで明日の天気を確認する' : '🌤 Googleで天気を確認する';
+            const weatherLabel = isTomorrow ? '🌤 明日の天気詳細を見る' : '🌤 今日の天気詳細を見る';
             pendingLinks.push({
               text: weatherLabel,
-              url: `https://www.google.co.jp/search?q=${encodeURIComponent(weatherQuery)}&hl=ja`,
+              url: wxResult.blobUrl,
               embedUrl: null
             });
           }
