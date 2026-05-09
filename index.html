@@ -238,6 +238,7 @@ let placesApiLinksAdded = false;  // Places APIが個別リンクを返したタ
 let streamingSpotLinks = new Set(); // 転写ストリーム中に既出力したスポット名（重複防止）
 let lastUserQuery = '';     // 最後のユーザー発話テキスト（ツール未使用時のGoogle検索用）
 let googleLinkScheduled = false; // Google検索リンクの重複追加防止フラグ
+let toolCalledThisTurn = false; // このターンでツールが呼ばれたか（Google検索リンク抑制用）
 let greetingComplete  = false;   // 挨拶ターン完了後フラグ（最初のturnComplete後にtrue）
 let greetingRetryTimer = null;  // 挨拶リトライタイマー（turnCompleteでキャンセル）
 let userSpokeInTurn   = false;   // そのターンで本物のinputTranscriptionを受信したか
@@ -2423,6 +2424,7 @@ async function handleServerMsg(msg) {
       // 次ターン用リセット
       placesApiLinksAdded = false;
       streamingSpotLinks = new Set();
+      toolCalledThisTurn = false;
 
       // 残った pendingLinks を表示（通常はツール応答時点で表示済みなので空のはず）
       if (pendingLinks.length > 0) {
@@ -2431,7 +2433,7 @@ async function handleServerMsg(msg) {
       }
 
       // ツールが呼ばれたかどうか
-      const _toolWasCalled = pendingLinks.length > 0; // 既にクリア済みなので実質 false だが後続ロジック用
+      const _toolWasCalled = toolCalledThisTurn; // ツールが実際に呼ばれたターンか
       const _isGreetedNow  = greetingComplete;  // 挨拶ターン自体ではなく、その完了後に true になる
       if (isGreeted && !greetingComplete) {
         greetingComplete = true;  // 挨拶ターン完了をマーク
@@ -2497,6 +2499,7 @@ async function handleServerMsg(msg) {
   // ── ツール呼び出し ──────────────────────────────────
   if (msg.toolCall) {
     console.info('[toolCall]', JSON.stringify(msg.toolCall));
+    toolCalledThisTurn = true;  // Google検索リンクを出さないようにする
     const calls = msg.toolCall.functionCalls || [];
     // ★ 改善: 複数ツール呼び出しを Promise.all で並列実行
     const responses = await Promise.all(calls.map(async (call) => {
@@ -2707,6 +2710,7 @@ function doDisconnect() {
   userSpokeInTurn      = false;
   sessionActive        = false;
   googleLinkScheduled  = false;
+  toolCalledThisTurn   = false;
   lastUserQuery        = '';
   lastInputWasText     = false;
   apiRowEl.style.display = '';
