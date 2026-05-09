@@ -194,7 +194,7 @@ const SYSTEM_INSTRUCTION =
   'ユーザーが「石巻」「仙台」などの市区町村名で質問しても、回答では「宮城県の天気は…」のように都道府県名で答えること。市区町村名で天気を案内することは禁止。' +
   '・日付・時刻・曜日→ get_current_datetime を必ず呼び出す。' +
   '・電車・路線の運行状況・遅延・運休→ get_train_status を呼び出す。・次の電車・時刻表→ get_next_trains を呼び出す。目的地がわかっている場合は to_station にも設定すること。「○○から△△への次の電車は？」という質問では station=○○、to_station=△△ を設定すること。' +
-  '・〇〇駅から●●駅への行き方・「〇〇から●●まで行きたい」「〇〇から●●への行き方」「〇〇から●●に行くには」など、出発地と目的地が明示された移動・ルート案内・乗り換え質問→ 必ず get_route を呼び出すこと。search_web は使わないこと。from_station には出発地（例:「東京」「新宿」）、to_station には目的地（例:「仙台」「横浜」）をそのままセットすること（「駅」は付けなくてよい）。出発時刻が指定された場合は departure_time="HH:MM" を設定し、明日なら departure_date="tomorrow" も設定すること。「ここから」「現在地から」など出発地が現在地の場合は use_current_location=true を設定し、from_station は省略すること。' +
+  '・〇〇駅から●●駅への行き方・「〇〇から●●まで行きたい」「〇〇から●●への行き方」「〇〇から●●に行くには」など、出発地と目的地が明示された移動・ルート案内・乗り換え質問→ 必ず get_route を呼び出すこと。search_web は使わないこと。from_station には出発地（例:「東京」「新宿」）、to_station には目的地（例:「仙台」「横浜」）をそのままセットすること（「駅」は付けなくてよい）。出発時刻が指定された場合は departure_time="HH:MM" を設定し、明日なら departure_date="tomorrow" も設定すること。「ここから」「現在地から」「ここ」など出発地が現在地・話者の現在位置を示す場合は use_current_location=true を設定し、from_station は省略すること。get_route を呼び出した場合は同じ質問で search_web を絶対に呼び出さないこと。' +
   '・レストラン・お店・カフェ・観光スポット・施設・おすすめを聞かれたら→ get_places を必ず呼び出す。' +
   '・お祭り・イベント・ニュース・最新情報・現在の営業状況・今年の日程など、時事性のある最新情報が必要な質問→ search_web を呼び出す。ただし天気・天気予報は時事性があっても search_web ではなく必ず get_current_weather を使うこと。歴史・文化・人物・地理・言語・科学など自分が知っている一般知識・歴史的事実はツールを使わず直接答えること（例：築城時期・創業年・歴史的出来事など）。' +
   '【回答ルール】' +
@@ -2575,7 +2575,10 @@ async function handleServerMsg(msg) {
         } else if (call.name === 'get_route') {
           const rFrom = call.args?.from_station || '';
           const rTo   = call.args?.to_station   || '';
-          const useCurrentLoc = call.args?.use_current_location === true;
+          // 「ここ」「現在地」など現在地を示す語が from_station に入っている場合も現在地扱い
+          const _fromRaw = (call.args?.from_station || '').replace(/\s+/g, '');
+          const _isHere = /^(ここ|現在地|今いる場所|いまいるところ|自分の場所|いまここ)$/.test(_fromRaw);
+          const useCurrentLoc = call.args?.use_current_location === true || _isHere;
           const rToQ  = rTo.endsWith('駅') ? rTo : rTo + '駅';
 
           if (useCurrentLoc) {
