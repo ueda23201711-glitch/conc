@@ -1326,47 +1326,57 @@ function applyPlaceReadings(text) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  天気情報取得（Open-Meteo / 無料・APIキー不要）
+//  天気情報取得（気象庁 JSON API / 無料・APIキー不要）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const WX_CODE = {
-  0:'快晴',1:'晴れ',2:'一部曇り',3:'曇り',
-  45:'霧',48:'霧氷',
-  51:'小雨',53:'雨',55:'強雨',
-  61:'小雨',63:'雨',65:'大雨',
-  71:'小雪',73:'雪',75:'大雪',77:'霰',
-  80:'にわか雨',81:'雨',82:'激しい雨',
-  85:'にわか雪',86:'大雪',
-  95:'雷雨',96:'雷雨（雹）',99:'激しい雷雨'
+
+// 都道府県 → 気象庁エリアコード（都道府県レベル）
+const JMA_AREA_CODE = {
+  '北海道': '016000',
+  '青森県': '020000', '岩手県': '030000', '宮城県': '040000',
+  '秋田県': '050000', '山形県': '060000', '福島県': '070000',
+  '茨城県': '080000', '栃木県': '090000', '群馬県': '100000',
+  '埼玉県': '110000', '千葉県': '120000', '東京都': '130000',
+  '神奈川県': '140000', '新潟県': '150000', '富山県': '160000',
+  '石川県': '170000', '福井県': '180000', '山梨県': '190000',
+  '長野県': '200000', '岐阜県': '210000', '静岡県': '220000',
+  '愛知県': '230000', '三重県': '240000', '滋賀県': '250000',
+  '京都府': '260000', '大阪府': '270000', '兵庫県': '280000',
+  '奈良県': '290000', '和歌山県': '300000', '鳥取県': '310000',
+  '島根県': '320000', '岡山県': '330000', '広島県': '340000',
+  '山口県': '350000', '徳島県': '360000', '香川県': '370000',
+  '愛媛県': '380000', '高知県': '390000', '福岡県': '400000',
+  '佐賀県': '410000', '長崎県': '420000', '熊本県': '430000',
+  '大分県': '440000', '宮崎県': '450000', '鹿児島県': '460100',
+  '沖縄県': '471000',
 };
 
-// 天気コード→絵文字
+// 天気テキスト → 絵文字
 function wxEmoji(cond) {
   if (!cond) return '🌡';
-  if (cond.includes('快晴') || cond.includes('晴れ')) return '☀️';
-  if (cond.includes('曇りがち') || cond.includes('薄曇')) return '🌤';
-  if (cond.includes('曇り')) return '☁️';
-  if (cond.includes('霧雨') || cond.includes('小雨')) return '🌦';
-  if (cond.includes('雨')) return '🌧';
+  if (cond.includes('快晴') || (cond.includes('晴') && !cond.includes('曇'))) return '☀️';
+  if (cond.includes('晴') && cond.includes('曇')) return '🌤';
+  if (cond.includes('曇') && !cond.includes('雨') && !cond.includes('雪')) return '☁️';
+  if (cond.includes('霧雨') || (cond.includes('雨') && cond.includes('小'))) return '🌦';
   if (cond.includes('雷')) return '⛈';
-  if (cond.includes('霙') || cond.includes('みぞれ')) return '🌨';
+  if (cond.includes('みぞれ') || cond.includes('霙')) return '🌨';
   if (cond.includes('雪')) return '❄️';
+  if (cond.includes('雨')) return '🌧';
   if (cond.includes('霧')) return '🌫';
   return '🌡';
 }
 
-// 天気カード用 Blob URL を生成（API不要・取得データから直接作成）
+// 天気カード用 Blob URL を生成
 function buildWeatherBlobUrl(card) {
   const emoji = wxEmoji(card.cond);
-  const dateLabel = card.date === 'tomorrow' ? '明日の天気予報' : '現在の天気';
-  const tempRow = card.date === 'tomorrow'
-    ? `<div class="row-item"><span class="lbl">最高気温</span><span class="val">${card.tmax}°C</span></div>
-       <div class="row-item"><span class="lbl">最低気温</span><span class="val">${card.tmin}°C</span></div>
-       <div class="row-item"><span class="lbl">降水確率</span><span class="val">${card.rain}%</span></div>
-       <div class="row-item"><span class="lbl">最大風速</span><span class="val">${card.wind} m/s</span></div>`
-    : `<div class="row-item"><span class="lbl">最高気温</span><span class="val">${card.tmax}°C</span></div>
-       <div class="row-item"><span class="lbl">最低気温</span><span class="val">${card.tmin}°C</span></div>
-       <div class="row-item"><span class="lbl">降水確率</span><span class="val">${card.rain}%</span></div>
-       <div class="row-item"><span class="lbl">最大風速</span><span class="val">${card.wind} m/s</span></div>`;
+  const dateLabel = card.date === 'tomorrow' ? '明日の天気予報' : '今日の天気予報';
+  const windRow = (card.wind && card.wind !== '--' && card.wind !== '−')
+    ? `<div class="row-item"><span class="lbl">最大風速</span><span class="val">${card.wind} m/s</span></div>`
+    : '';
+  const tempRow = `
+    <div class="row-item"><span class="lbl">最高気温</span><span class="val">${card.tmax !== '--' ? card.tmax + '°C' : '−'}</span></div>
+    <div class="row-item"><span class="lbl">最低気温</span><span class="val">${card.tmin !== '--' ? card.tmin + '°C' : '−'}</span></div>
+    <div class="row-item"><span class="lbl">降水確率</span><span class="val">${card.rain !== '--' ? card.rain + '%' : '−'}</span></div>
+    ${windRow}`;
   const html = `<!DOCTYPE html>
 <html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
@@ -1381,7 +1391,7 @@ function buildWeatherBlobUrl(card) {
   .place{font-size:20px;font-weight:700;color:#1b5e20;margin-bottom:4px}
   .date-lbl{font-size:13px;color:#666;margin-bottom:20px}
   .emoji{font-size:72px;line-height:1;margin:12px 0}
-  .cond{font-size:24px;font-weight:700;color:#333;margin-bottom:24px}
+  .cond{font-size:22px;font-weight:700;color:#333;margin-bottom:24px}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px}
   .row-item{background:#f1f8e9;border-radius:12px;padding:14px 10px}
   .lbl{display:block;font-size:12px;color:#666;margin-bottom:4px}
@@ -1399,29 +1409,27 @@ function buildWeatherBlobUrl(card) {
     <div class="emoji">${emoji}</div>
     <div class="cond">${card.cond}</div>
     <div class="grid">${tempRow}</div>
-    <div class="src">データ: Open-Meteo / OpenStreetMap</div>
+    <div class="src">データ: 気象庁 / OpenStreetMap</div>
   </div>
 </body></html>`;
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  setTimeout(() => URL.revokeObjectURL(url), 300000);  // 5分間有効
+  setTimeout(() => URL.revokeObjectURL(url), 300000);
   return url;
 }
 
 async function fetchWeather(location, date = 'today') {
-  // ① ジオコーディング: Nominatim（日本語地名対応・無料）を使用
   const fetchWithTimeout = (url, opts = {}, ms = 8000) => {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), ms);
     return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
   };
 
-  const nomUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&countrycodes=jp&limit=3&accept-language=ja`;
-  let nomResp, nomData;
+  // ① Nominatim でジオコーディング（都道府県情報付き）
+  const nomUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&countrycodes=jp&limit=3&accept-language=ja&addressdetails=1`;
+  let nomData;
   try {
-    nomResp = await fetchWithTimeout(nomUrl, {
-      headers: { 'Accept-Language': 'ja', 'Accept': 'application/json' }
-    });
+    const nomResp = await fetchWithTimeout(nomUrl, { headers: { 'Accept-Language': 'ja', 'Accept': 'application/json' } });
     nomData = await nomResp.json();
   } catch (e) {
     return { text: `「${location}」の位置情報の取得に失敗しました（${e.name === 'AbortError' ? 'タイムアウト' : e.message}）`, blobUrl: null };
@@ -1429,40 +1437,99 @@ async function fetchWeather(location, date = 'today') {
   if (!nomData?.length) return { text: `「${location}」の位置情報が見つかりませんでした。`, blobUrl: null };
 
   const best = nomData[0];
-  const lat  = parseFloat(best.lat);
-  const lon  = parseFloat(best.lon);
-  const name = best.display_name?.split('、')[0] || location;
+  const displayName = best.display_name?.split(',')[0]?.trim() || location;
+  const prefecture = best.address?.state || best.address?.county || '';
 
-  if (date === 'tomorrow') {
-    const wxUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-      `&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,wind_speed_10m_max` +
-      `&timezone=auto&forecast_days=2`;
-    const wxData = await (await fetch(wxUrl)).json();
-    const d = wxData.daily;
-    const cond  = WX_CODE[d.weather_code[1]] ?? '不明';
-    const tmax  = Math.round(d.temperature_2m_max[1]);
-    const tmin  = Math.round(d.temperature_2m_min[1]);
-    const rain  = d.precipitation_probability_max[1];
-    const wind  = Math.round(d.wind_speed_10m_max[1] * 10) / 10;
-    const text  = `${name}（日本）の明日の天気予報: ${cond}、最高${tmax}°C／最低${tmin}°C、降水確率${rain}%、最大風速${wind}m/s`;
-    const blobUrl = buildWeatherBlobUrl({ name, date: 'tomorrow', cond, tmax, tmin, rain, wind });
-    return { text, blobUrl };
-  } else {
-    // 今日の天気は日次予報（最高/最低/降水確率）で返す
-    const wxUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-      `&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,wind_speed_10m_max` +
-      `&timezone=auto&forecast_days=1`;
-    const wxData = await (await fetch(wxUrl)).json();
-    const d     = wxData.daily;
-    const cond  = WX_CODE[d.weather_code[0]] ?? '不明';
-    const tmax  = Math.round(d.temperature_2m_max[0]);
-    const tmin  = Math.round(d.temperature_2m_min[0]);
-    const rain  = d.precipitation_probability_max[0];
-    const wind  = Math.round(d.wind_speed_10m_max[0] * 10) / 10;
-    const text  = `${name}（日本）の今日の天気予報: ${cond}、最高${tmax}°C／最低${tmin}°C、降水確率${rain}%、最大風速${wind}m/s`;
-    const blobUrl = buildWeatherBlobUrl({ name, date: 'today', cond, tmax, tmin, rain, wind });
-    return { text, blobUrl };
+  // ② 都道府県 → 気象庁エリアコード
+  let areaCode = null;
+  // Nominatim が返す state（"宮城県" 等）で直接マッチ
+  for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
+    if (prefecture.includes(key) || key.includes(prefecture.replace(/[都道府県]/, ''))) {
+      areaCode = code; break;
+    }
   }
+  // 入力地名からもフォールバック検索
+  if (!areaCode) {
+    for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
+      const bare = key.replace(/[都道府県]$/, '');
+      if (location.includes(bare) || location.includes(key)) {
+        areaCode = code; break;
+      }
+    }
+  }
+  if (!areaCode) {
+    return { text: `「${location}」の都道府県を特定できませんでした（例: 仙台市、青森市、東京など都市名で入力してください）`, blobUrl: null };
+  }
+
+  // ③ 気象庁 JSON API（無料・APIキー不要）
+  const jmaUrl = `https://www.jma.go.jp/bosai/forecast/data/forecast/${areaCode}.json`;
+  let jmaData;
+  try {
+    const jmaResp = await fetchWithTimeout(jmaUrl);
+    if (!jmaResp.ok) throw new Error(`HTTP ${jmaResp.status}`);
+    jmaData = await jmaResp.json();
+  } catch (e) {
+    return { text: `気象庁データの取得に失敗しました（${e.message}）`, blobUrl: null };
+  }
+
+  // JST 日付文字列（YYYY-MM-DD）
+  const jstNow = new Date(Date.now() + 9 * 3600 * 1000);
+  const todayStr    = jstNow.toISOString().slice(0, 10);
+  const tomorrowStr = new Date(jstNow.getTime() + 86400000).toISOString().slice(0, 10);
+
+  const ts = jmaData[0].timeSeries;
+
+  // --- 天気テキスト（timeSeries[0]: 今日・明日・明後日）---
+  const wxArea = ts[0].areas[0];
+  const todayWx    = (wxArea.weathers?.[0] || '不明').replace(/\s+/g, '');
+  const tomorrowWx = (wxArea.weathers?.[1] || '不明').replace(/\s+/g, '');
+
+  // --- 降水確率（timeSeries[1]: 6時間毎）---
+  const popSeries = ts[1];
+  const popArea   = popSeries.areas[0];
+  const popDefs   = popSeries.timeDefines;
+  const maxPop = (dayStr) => {
+    const vals = popDefs
+      .map((t, i) => t.startsWith(dayStr) ? parseInt(popArea.pops?.[i] ?? '-1') : -1)
+      .filter(v => v >= 0);
+    return vals.length ? Math.max(...vals) : '--';
+  };
+  const todayRain    = maxPop(todayStr);
+  const tomorrowRain = maxPop(tomorrowStr);
+
+  // --- 気温（timeSeries[2]: 00:00=最低, 09:00=最高）---
+  let todayTmax = '--', todayTmin = '--', tomorrowTmax = '--', tomorrowTmin = '--';
+  if (ts[2]) {
+    const tempArea = ts[2].areas[0];
+    const tempDefs = ts[2].timeDefines;
+    tempDefs.forEach((t, i) => {
+      const val = tempArea.temps?.[i];
+      if (val === undefined || val === null || val === '') return;
+      const dayStr = t.slice(0, 10);
+      const hour   = parseInt(t.slice(11, 13));
+      if (dayStr === todayStr) {
+        if (hour >= 6) todayTmax = val; else todayTmin = val;
+      } else if (dayStr === tomorrowStr) {
+        if (hour >= 6) tomorrowTmax = val; else tomorrowTmin = val;
+      }
+    });
+  }
+
+  // --- 結果組み立て ---
+  const cond = date === 'tomorrow' ? tomorrowWx : todayWx;
+  const tmax = date === 'tomorrow' ? tomorrowTmax : todayTmax;
+  const tmin = date === 'tomorrow' ? tomorrowTmin : todayTmin;
+  const rain = date === 'tomorrow' ? tomorrowRain : todayRain;
+  const dateLabel = date === 'tomorrow' ? '明日の天気予報' : '今日の天気予報';
+
+  const tempStr = (tmax !== '--' || tmin !== '--')
+    ? `、最高${tmax !== '--' ? tmax + '°C' : '−'}／最低${tmin !== '--' ? tmin + '°C' : '−'}`
+    : '';
+  const rainStr = rain !== '--' ? `、降水確率${rain}%` : '';
+  const text = `${displayName}の${dateLabel}: ${cond}${tempStr}${rainStr}（気象庁データ）`;
+
+  const blobUrl = buildWeatherBlobUrl({ name: displayName, date, cond, tmax, tmin, rain, wind: '--' });
+  return { text, blobUrl };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2309,7 +2376,7 @@ async function handleServerMsg(msg) {
           const wxResult = await fetchWeather(call.args?.location || '東京', call.args?.date || 'today');
           output = wxResult.text;
           console.info('[weather]', output);
-          // ターン完了後に天気カードリンクをキューに積む（Open-Meteoデータと一致）
+          // ターン完了後に天気カードリンクをキューに積む（気象庁データ）
           if (wxResult.blobUrl && output && !output.includes('失敗') && !output.includes('見つかりません')) {
             const isTomorrow = (call.args?.date === 'tomorrow');
             const weatherLabel = isTomorrow ? '🌤 明日の天気詳細を見る' : '🌤 今日の天気詳細を見る';
