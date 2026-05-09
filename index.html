@@ -2283,9 +2283,8 @@ async function handleServerMsg(msg) {
       }
       userSpokeInTurn = false;  // 次ターン用にリセット
       lastInputWasText = false;  // 次ターン用にリセット
-      const waitMs = Math.max(300, (nextPlayAt - (playCtx ? playCtx.currentTime : 0)) * 1000 + 500);
-      setTimeout(() => { micBuffer = []; aiTalking = false; }, waitMs);  // 再生完了後にバッファも捨てる
-      setListening(true);
+      const waitMs = Math.max(300, (nextPlayAt - (playCtx ? playCtx.currentTime : 0)) * 1000 + 800);
+      setTimeout(() => { micBuffer = []; aiTalking = false; setListening(true); }, waitMs);  // 再生完了後にマイクON
     }
 
     // ユーザー割り込み
