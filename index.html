@@ -241,6 +241,7 @@ let transcriptionDoneTimer = null; // 転写完了検出デバウンスタイマ
 let lastUserQuery = '';     // 最後のユーザー発話テキスト（ツール未使用時のGoogle検索用）
 let googleLinkScheduled = false; // Google検索リンクの重複追加防止フラグ
 let toolCalledThisTurn = false; // このターンでツールが呼ばれたか（Google検索リンク抑制用）
+let cachedGeoPosition = null;  // ページロード時に取得してキャッシュした現在地
 let greetingComplete  = false;   // 挨拶ターン完了後フラグ（最初のturnComplete後にtrue）
 let greetingRetryTimer = null;  // 挨拶リトライタイマー（turnCompleteでキャンセル）
 let userSpokeInTurn   = false;   // そのターンで本物のinputTranscriptionを受信したか
@@ -2584,9 +2585,10 @@ async function handleServerMsg(msg) {
           if (useCurrentLoc) {
             appendBubble(`🗺 現在地から${rTo}へのルートを取得中…`, 'system');
             try {
-              const pos = await new Promise((resolve, reject) =>
+              const pos = cachedGeoPosition || await new Promise((resolve, reject) =>
                 navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000, enableHighAccuracy: true })
               );
+              if (pos) cachedGeoPosition = pos;
               const lat = pos.coords.latitude;
               const lng = pos.coords.longitude;
               const gmUrl = `https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${encodeURIComponent(rToQ)}&travelmode=transit&hl=ja`;
@@ -2610,14 +2612,35 @@ async function handleServerMsg(msg) {
           }
         } else if (call.name === 'search_web') {
           const q = call.args?.query || '';
-          appendBubble(`🔎 「${q}」を検索中…`, 'system');
-          output = `「${q}」の検索結果リンクを表示しました。詳しくはリンク先をご参照ください。`;
-          const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(q)}&hl=ja`;
-          pendingLinks.push({
-            text: `🔎 「${q}」をGoogleで検索する`,
-            url: searchUrl,
-            embedUrl: null
-          });
+          // 「ここから〇〇」「現在地から〇〇」パターンをMapsルートリンクに変換
+          const _routeMatch = q.replace(/\s+/g, '').match(/^(ここ|現在地|今いる場所|いまここ)から(.+?)(?:まで|へ|の(?:道|ルート|行き方|道順|道筋))/);
+          if (_routeMatch) {
+            const _dest = _routeMatch[2];
+            const _destQ = _dest.endsWith('駅') ? _dest : _dest;
+            appendBubble(`🗺 現在地から${_dest}へのルートを取得中…`, 'system');
+            let _gmUrl;
+            try {
+              const _pos = cachedGeoPosition || await new Promise((res, rej) =>
+                navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000, enableHighAccuracy: true })
+              );
+              if (_pos) cachedGeoPosition = _pos;
+              _gmUrl = `https://www.google.com/maps/dir/?api=1&origin=${_pos.coords.latitude},${_pos.coords.longitude}&destination=${encodeURIComponent(_destQ)}&travelmode=transit&hl=ja`;
+              output = `現在地から${_dest}へのルートをGoogleマップでご案内します。リンクからご確認ください。`;
+            } catch (_e) {
+              _gmUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(_destQ)}&travelmode=transit&hl=ja`;
+              output = `${_dest}へのルートをGoogleマップでご案内します。リンクからご確認ください。`;
+            }
+            pendingLinks.push({ text: `🗺 Google マップで現在地から${_dest}へのルートを見る`, url: _gmUrl, embedUrl: null });
+          } else {
+            appendBubble(`🔎 「${q}」を検索中…`, 'system');
+            output = `「${q}」の検索結果リンクを表示しました。詳しくはリンク先をご参照ください。`;
+            const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(q)}&hl=ja`;
+            pendingLinks.push({
+              text: `🔎 「${q}」をGoogleで検索する`,
+              url: searchUrl,
+              embedUrl: null
+            });
+          }
         }
       } catch (e) {
         output = `天気情報の取得に失敗しました: ${e.message}`;
@@ -2825,6 +2848,14 @@ startBtn.addEventListener('click', async () => {
   } catch (_) {}
 
   startBtn.disabled = true;
+  // 位置情報をプリフェッチ（ユーザー操作中に要求することでダイアログが自然に出る）
+  if (navigator.geolocation && !cachedGeoPosition) {
+    navigator.geolocation.getCurrentPosition(
+      pos => { cachedGeoPosition = pos; console.info('[geo] cached:', pos.coords.latitude, pos.coords.longitude); },
+      err => { console.info('[geo] prefetch skipped:', err.message); },
+      { timeout: 8000, enableHighAccuracy: true }
+    );
+  }
   try {
     await validateApiKey(key);   // ① REST で認証チェック
     connect(key);                // ② WebSocket 接続
