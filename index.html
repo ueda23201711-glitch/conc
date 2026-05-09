@@ -2647,10 +2647,15 @@ function showLinksOrdered() {
     streamingSpotLinks.add(name);
   });
 
-  // 非スポットリンク（ルート・検索等）を末尾に追加
-  pendingLinks.forEach((lnk, i) => {
-    if (!_usedIdx.has(i) && !lnk.text.startsWith('📍')) _ordered.push(lnk);
-  });
+  // 【】が一つも見つからなかった場合は📍リンクも全部そのまま追加（Geminiが括弧を使わなかった場合の救済）
+  if (_spotNames.length === 0) {
+    pendingLinks.forEach((lnk, i) => { if (!_usedIdx.has(i)) _ordered.push(lnk); });
+  } else {
+    // 非スポットリンク（ルート・検索等）を末尾に追加
+    pendingLinks.forEach((lnk, i) => {
+      if (!_usedIdx.has(i) && !lnk.text.startsWith('📍')) _ordered.push(lnk);
+    });
+  }
 
   // 【】・ふりがな除去 → リンク表示
   _b.textContent = _text.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
