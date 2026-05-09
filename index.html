@@ -236,6 +236,7 @@ let sessionActive = false;  // setupComplete後のセッション中フラグ
 let pendingLinks  = [];     // ツール応答後に即時表示するリンクキュー
 let placesApiLinksAdded = false;  // Places APIが個別リンクを返したターンかどうか
 let streamingSpotLinks = new Set(); // 転写ストリーム中に既出力したスポット名（重複防止）
+let transcriptionDoneTimer = null; // 転写完了検出デバウンスタイマー
 let lastUserQuery = '';     // 最後のユーザー発話テキスト（ツール未使用時のGoogle検索用）
 let googleLinkScheduled = false; // Google検索リンクの重複追加防止フラグ
 let toolCalledThisTurn = false; // このターンでツールが呼ばれたか（Google検索リンク抑制用）
@@ -2345,89 +2346,24 @@ async function handleServerMsg(msg) {
         }
         scrollBottom();
 
-        // ── ストリーミング中スポットリンク生成 ───────────────────────
-        // 【スポット名】の閉じ括弧が届いた瞬間にGoogle Mapsリンクを即表示
-        // generationCompleteを待たず、テキストと同時にリンクを出す
-        if (!placesApiLinksAdded && t.includes('】')) {
-          const fullText = b.textContent;
-          [...fullText.matchAll(/【([^】]{2,20})】/g)].forEach(m => {
-            const name = m[1];
-            if (!streamingSpotLinks.has(name)) {
-              // 最初のスポットリンク生成時: 汎用📍リンク（検索クエリ等）は不要なので除去
-              if (streamingSpotLinks.size === 0) {
-                pendingLinks = pendingLinks.filter(l => !l.text.startsWith('📍'));
-              }
-              streamingSpotLinks.add(name);
-              appendBubbleWithLinks([{
-                text: `📍 ${name} をGoogle マップで見る`,
-                url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}`,
-                embedUrl: null
-              }], 'system');
-            }
-          });
+        // 転写チャンクが届くたびにデバウンスタイマーをリセット
+        // 最後のチャンクから 500ms 後にリンクを表示（吹き出し完成直後）
+        if (pendingLinks.length > 0 || (!placesApiLinksAdded && b.textContent.includes('【'))) {
+          if (transcriptionDoneTimer !== null) clearTimeout(transcriptionDoneTimer);
+          transcriptionDoneTimer = setTimeout(() => {
+            transcriptionDoneTimer = null;
+            showLinksOrdered();
+          }, 500);
         }
       }
     }
 
-    // 生成完了 → 200ms待って転写を確定させてからリンクを【スポット名】順に表示
+    // 生成完了 → デバウンスタイマーを 200ms に短縮（転写がほぼ終わっているはず）
     if (sc.generationComplete) {
-      // 残りの outputTranscription が届くのを少し待つ
-      setTimeout(() => {
-        const _gcBubbles = chatEl.querySelectorAll('.row.assistant .bubble');
-        if (_gcBubbles.length === 0) return; // 吹き出しがまだない場合は turnComplete に任せる
-        const _gcB = _gcBubbles[_gcBubbles.length - 1];
-        const _gcText = _gcB.textContent;
-        if (!_gcText || _gcText.trim().length < 5) return; // テキストがなければスキップ
-
-        // 【スポット名】の登場順を取得
-        const _gcSpotNames = [..._gcText.matchAll(/【([^】]{2,20})】/g)].map(m => m[1]);
-
-        if (_gcSpotNames.length > 0 || pendingLinks.length > 0) {
-          // Places API リンクと【スポット名】を照合して登場順に並べ替え
-          const _usedLinkIdx = new Set();
-          const _orderedLinks = [];
-
-          _gcSpotNames.forEach(spotName => {
-            // pendingLinks から最も名前が近いリンクを探す
-            let bestIdx = -1;
-            let bestScore = 0;
-            pendingLinks.forEach((lnk, i) => {
-              if (_usedLinkIdx.has(i) || !lnk.text.startsWith('📍')) return;
-              const lnkName = lnk.text.replace(/^📍\s*/, '').replace(/\s*をGoogle マップで見る$/, '');
-              // 部分一致スコア
-              const score = lnkName.includes(spotName) || spotName.includes(lnkName) ? 2
-                          : [...spotName].filter(c => lnkName.includes(c)).length;
-              if (score > bestScore) { bestScore = score; bestIdx = i; }
-            });
-
-            if (bestIdx !== -1 && bestScore > 0) {
-              _usedLinkIdx.add(bestIdx);
-              _orderedLinks.push(pendingLinks[bestIdx]);
-            } else {
-              // Places API に対応リンクがない → 汎用 Google マップ検索リンクを生成
-              _orderedLinks.push({
-                text: `📍 ${spotName} をGoogle マップで見る`,
-                url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spotName)}`,
-                embedUrl: null
-              });
-            }
-          });
-
-          // 未使用の非スポットリンク（ルート・検索等）を末尾に追加
-          pendingLinks.forEach((lnk, i) => {
-            if (!_usedLinkIdx.has(i) && !lnk.text.startsWith('📍')) _orderedLinks.push(lnk);
-          });
-
-          // 【】タグ・ふりがなを除去してからリンクを表示
-          _gcB.textContent = _gcText.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
-          _orderedLinks.forEach(lnk => appendBubbleWithLinks([lnk], 'system'));
-          pendingLinks = [];
-          placesApiLinksAdded = true; // turnComplete での重複表示を防ぐ
-          streamingSpotLinks = new Set(_gcSpotNames); // 重複防止
-        } else {
-          // スポットも pendingLinks もない場合は【】除去だけ
-          _gcB.textContent = _gcText.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
-        }
+      if (transcriptionDoneTimer !== null) clearTimeout(transcriptionDoneTimer);
+      transcriptionDoneTimer = setTimeout(() => {
+        transcriptionDoneTimer = null;
+        showLinksOrdered();
       }, 200);
     }
 
@@ -2435,43 +2371,8 @@ async function handleServerMsg(msg) {
     if (sc.turnComplete) {
       finishAiBubble();
 
-      // 安全網: generationComplete の setTimeout が間に合わなかった場合の補完
-      const _lastAiBubbleForLinks = chatEl.querySelectorAll('.row.assistant .bubble');
-      const _tcB = _lastAiBubbleForLinks.length > 0
-        ? _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1] : null;
-      const _aiBubbleText = _tcB ? _tcB.textContent : '';
-      if (!placesApiLinksAdded && _aiBubbleText.includes('】')) {
-        // 【スポット名】順に表示
-        const _tcSpotNames = [..._aiBubbleText.matchAll(/【([^】]{2,20})】/g)].map(m => m[1]);
-        const _tcUsed = new Set();
-        _tcSpotNames.forEach(spotName => {
-          if (streamingSpotLinks.has(spotName)) return;
-          let bestIdx = -1, bestScore = 0;
-          pendingLinks.forEach((lnk, i) => {
-            if (_tcUsed.has(i) || !lnk.text.startsWith('📍')) return;
-            const lnkName = lnk.text.replace(/^📍\s*/, '').replace(/\s*をGoogle マップで見る$/, '');
-            const score = lnkName.includes(spotName) || spotName.includes(lnkName) ? 2
-                        : [...spotName].filter(c => lnkName.includes(c)).length;
-            if (score > bestScore) { bestScore = score; bestIdx = i; }
-          });
-          if (bestIdx !== -1 && bestScore > 0) {
-            _tcUsed.add(bestIdx);
-            appendBubbleWithLinks([pendingLinks[bestIdx]], 'system');
-          } else {
-            appendBubbleWithLinks([{
-              text: `📍 ${spotName} をGoogle マップで見る`,
-              url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spotName)}`,
-              embedUrl: null
-            }], 'system');
-          }
-          streamingSpotLinks.add(spotName);
-        });
-        pendingLinks = pendingLinks.filter((_, i) => !_tcUsed.has(i));
-      }
-      // 【】タグ・ふりがな除去（常に実行）
-      if (_tcB) {
-        _tcB.textContent = _aiBubbleText.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
-      }
+      // 安全網: デバウンスタイマーをキャンセルして即時実行
+      showLinksOrdered();
       // 残った pendingLinks を表示（通常は転写開始時点で表示済みなので空のはず）
       if (pendingLinks.length > 0) {
         pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
@@ -2693,6 +2594,59 @@ async function handleServerMsg(msg) {
 
 
 // ──────────────────────────────────────────────────
+//  吹き出しの【スポット名】順にリンクを並べて表示
+// ──────────────────────────────────────────────────
+function showLinksOrdered() {
+  if (transcriptionDoneTimer !== null) { clearTimeout(transcriptionDoneTimer); transcriptionDoneTimer = null; }
+  // すでに表示済みならスキップ
+  if (placesApiLinksAdded && pendingLinks.length === 0) return;
+
+  const _bubbles = chatEl.querySelectorAll('.row.assistant .bubble');
+  if (_bubbles.length === 0) return;
+  const _b = _bubbles[_bubbles.length - 1];
+  const _text = _b.textContent;
+
+  // 【スポット名】の登場順を取得
+  const _spotNames = [..._text.matchAll(/【([^】]{2,20})】/g)].map(m => m[1]);
+  const _usedIdx = new Set();
+  const _ordered = [];
+
+  _spotNames.forEach(name => {
+    if (streamingSpotLinks.has(name)) return; // streaming で既出力済み
+    let bestIdx = -1, bestScore = 0;
+    pendingLinks.forEach((lnk, i) => {
+      if (_usedIdx.has(i) || !lnk.text.startsWith('📍')) return;
+      const lnkName = lnk.text.replace(/^📍\s*/, '').replace(/\s*をGoogle マップで見る$/, '');
+      const score = lnkName.includes(name) || name.includes(lnkName) ? 2
+                  : [...name].filter(c => lnkName.includes(c)).length;
+      if (score > bestScore) { bestScore = score; bestIdx = i; }
+    });
+    if (bestIdx !== -1 && bestScore > 0) {
+      _usedIdx.add(bestIdx);
+      _ordered.push(pendingLinks[bestIdx]);
+    } else {
+      _ordered.push({
+        text: `📍 ${name} をGoogle マップで見る`,
+        url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}`,
+        embedUrl: null
+      });
+    }
+    streamingSpotLinks.add(name);
+  });
+
+  // 非スポットリンク（ルート・検索等）を末尾に追加
+  pendingLinks.forEach((lnk, i) => {
+    if (!_usedIdx.has(i) && !lnk.text.startsWith('📍')) _ordered.push(lnk);
+  });
+
+  // 【】・ふりがな除去 → リンク表示
+  _b.textContent = _text.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
+  _ordered.forEach(lnk => appendBubbleWithLinks([lnk], 'system'));
+  pendingLinks = [];
+  placesApiLinksAdded = true;
+}
+
+// ──────────────────────────────────────────────────
 //  ユーザー発言の誤変換を Gemini REST API で補正
 // ──────────────────────────────────────────────────
 async function correctTranscription(bubbleEl, rawText) {
@@ -2750,6 +2704,7 @@ function doDisconnect() {
   pendingBubble        = null;
   pendingLinks          = [];
   streamingSpotLinks    = new Set();
+  if (transcriptionDoneTimer !== null) { clearTimeout(transcriptionDoneTimer); transcriptionDoneTimer = null; }
   isGreeted            = false;
   greetingComplete     = false;
   if (greetingRetryTimer !== null) { clearTimeout(greetingRetryTimer); greetingRetryTimer = null; }
