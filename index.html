@@ -1514,7 +1514,9 @@ async function fetchWeather(location, date = 'today') {
     ? `、最高${tmax !== '--' ? tmax + '°C' : '−'}／最低${tmin !== '--' ? tmin + '°C' : '−'}`
     : '';
   const rainStr = rain !== '--' ? `、降水確率${rain}%` : '';
-  const text = `${displayName}の${dateLabel}: ${cond}${tempStr}${rainStr}（気象庁データ）`;
+  // 気象庁データは都道府県レベルなので、都道府県名で案内する
+  const areaName = prefecture || displayName;
+  const text = `${areaName}の${dateLabel}: ${cond}${tempStr}${rainStr}（気象庁データ）`;
 
   // 気象庁公式予報ページへの直接リンク
   const jmaPageUrl = `https://www.jma.go.jp/bosai/forecast/#area_type=offices&area_code=${areaCode}`;
