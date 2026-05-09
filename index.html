@@ -193,7 +193,7 @@ const SYSTEM_INSTRUCTION =
   'ユーザーが「石巻」「仙台」などの市区町村名で質問しても、回答では「宮城県の天気は…」のように都道府県名で答えること。市区町村名で天気を案内することは禁止。' +
   '・日付・時刻・曜日→ get_current_datetime を必ず呼び出す。' +
   '・電車・路線の運行状況・遅延・運休→ get_train_status を呼び出す。・次の電車・時刻表→ get_next_trains を呼び出す。目的地がわかっている場合は to_station にも設定すること。「○○から△△への次の電車は？」という質問では station=○○、to_station=△△ を設定すること。' +
-  '・〇〇駅から●●駅への行き方・ルート案内・乗り換え→ get_route を必ず呼び出す。出発時刻が指定された場合は departure_time="HH:MM" を設定し、明日なら departure_date="tomorrow" も設定すること。' +
+  '・〇〇駅から●●駅への行き方・「〇〇から●●まで行きたい」「〇〇から●●への行き方」「〇〇から●●に行くには」など、出発地と目的地が明示された移動・ルート案内・乗り換え質問→ 必ず get_route を呼び出すこと。search_web は使わないこと。from_station には出発地（例:「東京」「新宿」）、to_station には目的地（例:「仙台」「横浜」）をそのままセットすること（「駅」は付けなくてよい）。出発時刻が指定された場合は departure_time="HH:MM" を設定し、明日なら departure_date="tomorrow" も設定すること。' +
   '・レストラン・お店・カフェ・観光スポット・施設・おすすめを聞かれたら→ get_places を必ず呼び出す。' +
   '・お祭り・イベント・ニュース・最新情報・現在の営業状況・今年の日程など、時事性のある最新情報が必要な質問→ search_web を呼び出す。ただし天気・天気予報は時事性があっても search_web ではなく必ず get_current_weather を使うこと。歴史・文化・人物・地理・言語・科学など自分が知っている一般知識・歴史的事実はツールを使わず直接答えること（例：築城時期・創業年・歴史的出来事など）。' +
   '【回答ルール】' +
@@ -2134,7 +2134,7 @@ function connect(apiKey) {
             }
           }, {
             name: 'search_web',
-            description: '最新情報・時事情報・現在の営業状況・今年の開催日程など、自分の学習データでは正確に答えられない時事性のある情報を検索します。歴史的事実・一般知識・文化・地理など既知の情報はツールを使わず直接回答してください。【重要】天気・天気予報（今日・明日・明後日・週間を問わず）には絶対に使わないこと。天気は必ず get_current_weather を使うこと。',
+            description: '最新情報・時事情報・現在の営業状況・今年の開催日程など、自分の学習データでは正確に答えられない時事性のある情報を検索します。歴史的事実・一般知識・文化・地理など既知の情報はツールを使わず直接回答してください。【重要】天気・天気予報（今日・明日・明後日・週間を問わず）には絶対に使わないこと。天気は必ず get_current_weather を使うこと。出発地と目的地が明示された移動・ルート案内・乗り換え質問には絶対に使わないこと。必ず get_route を使うこと。',
             parameters: {
               type: 'OBJECT',
               properties: {
@@ -2552,7 +2552,10 @@ async function handleServerMsg(msg) {
           const rFrom = call.args?.from_station || '';
           const rTo   = call.args?.to_station   || '';
           appendBubble(`🗺 ルート検索中…（${rFrom} → ${rTo}）`, 'system');
-          const gmFallbackUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(rFrom + '駅')}&destination=${encodeURIComponent(rTo + '駅')}&travelmode=transit&hl=ja`;
+          // 既に「駅」で終わっている場合は重複しない
+          const rFromQ = rFrom.endsWith('駅') ? rFrom : rFrom + '駅';
+          const rToQ   = rTo.endsWith('駅')   ? rTo   : rTo   + '駅';
+          const gmFallbackUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(rFromQ)}&destination=${encodeURIComponent(rToQ)}&travelmode=transit&hl=ja`;
           pendingLinks.push({ text: `🗺 Google マップで乗換案内を見る（${rFrom}→${rTo}）`, url: gmFallbackUrl, embedUrl: null });
           output = `${rFrom}から${rTo}のルートをGoogleマップでご案内します。リンクからご確認ください。`;
           console.info('[route] google maps only mode:', output);
