@@ -125,11 +125,12 @@
           placeholder="Gemini API キーを入力（接続後は非表示になります）"
           autocomplete="off" spellcheck="false">
 
-        <input id="navitimeKey" class="api-input" type="password"
-          placeholder="NAVITIME APIキー（RapidAPI）（ルート案内用）"
-          autocomplete="off" spellcheck="false" style="margin-top:6px">
+
         <input id="placesKey" class="api-input" type="password"
           placeholder="Google Places APIキー（New）（お店・場所検索用）"
+          autocomplete="off" spellcheck="false" style="margin-top:6px">
+        <input id="yahooKey" class="api-input" type="password"
+          placeholder="Yahoo App ID（ルビ振りAPI・地名読み改善用）"
           autocomplete="off" spellcheck="false" style="margin-top:6px">
       </div>
       <!-- 接続ボタン行 -->
@@ -173,8 +174,8 @@ const IN_RATE  = 16000;   // マイク入力サンプルレート (Hz)
 const OUT_RATE = 24000;   // Gemini 出力サンプルレート (Hz)
 const FLUSH_MS = 100;     // 音声チャンク送信間隔 (ms)
 const STORAGE_KEY      = 'gemini_concierge_apikey';
-const NAVITIME_STORAGE_KEY = 'navitime_apikey';
 const PLACES_STORAGE_KEY   = 'places_apikey';
+const YAHOO_STORAGE_KEY    = 'yahoo_appid';
 
 const SYSTEM_INSTRUCTION =
   'あなたはAIコンシェルジュです。' +
@@ -183,6 +184,7 @@ const SYSTEM_INSTRUCTION =
   '返答は2〜3文・合計120文字以内で要点のみ。ただしお店・スポット紹介時はこの文字数制限を適用しない。' +
   '確認質問を入れる場合も1文以内で短く。' +
   '出力は常に日本語のみ。' +
+  '【発音について】ツール返答のテキストに「漢字（よみ）」形式でふりがなが付いている場合、そのよみを発音の参考にすること。【絶対厳守】自分の返答テキストに「漢字（よみ）」形式や括弧付きのふりがなを一切含めないこと。漢字のみを記載し、読みは括弧で追記せず声でも繰り返さないこと。例：ツール返答に「奥入瀬渓流（おいらせけいりゅう）」とあれば、自分の返答では「奥入瀬渓流は〜」とだけ書き、おいらせけいりゅうという読みを括弧内に追加したり声に出して繰り返したりしないこと。' +
   '【ツール使用ルール】ツールが利用可能な場合は必ず呼び出すこと。自己判断でツールを使わないことは禁止。' +
   '・天気・気象→ get_current_weather を必ず呼び出す。' +
   '・日付・時刻・曜日→ get_current_datetime を必ず呼び出す。' +
@@ -243,15 +245,15 @@ if (savedKey) {
   apiKeyEl.value = savedKey;
   apiKeyEl.placeholder = '（保存済み）変更する場合は上書き入力';
 }
-const savedNavitimeKey = localStorage.getItem(NAVITIME_STORAGE_KEY);
-if (savedNavitimeKey) {
-  document.getElementById('navitimeKey').value = savedNavitimeKey;
-  document.getElementById('navitimeKey').placeholder = 'NAVITIMEキー（保存済み）';
-}
 const savedPlacesKey = localStorage.getItem(PLACES_STORAGE_KEY);
 if (savedPlacesKey) {
   document.getElementById('placesKey').value = savedPlacesKey;
   document.getElementById('placesKey').placeholder = 'Google Places APIキー（保存済み）';
+}
+const savedYahooKey = localStorage.getItem(YAHOO_STORAGE_KEY);
+if (savedYahooKey) {
+  document.getElementById('yahooKey').value = savedYahooKey;
+  document.getElementById('yahooKey').placeholder = 'Yahoo App ID（保存済み）';
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -429,6 +431,823 @@ function setListening(on) {
 }
 
 
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  地名読み辞書（ローカル）― ツール返答テキストに読みを付与し誤読を防ぐ
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const PLACE_READINGS = {
+  // ── よく誤読される一般語 ──
+  '出土品': 'しゅつどひん',
+  '出土': 'しゅつど',
+  '縄文': 'じょうもん',
+  '弥生': 'やよい',
+  '古墳': 'こふん',
+  '遺跡': 'いせき',
+  '集落': 'しゅうらく',
+  '史跡': 'しせき',
+  '特別史跡': 'とくべつしせき',
+  '国宝': 'こくほう',
+  '重要文化財': 'じゅうようぶんかざい',
+  '紅葉': 'こうよう',
+  '新緑': 'しんりょく',
+  '清流': 'せいりゅう',
+  '景勝地': 'けいしょうち',
+  '名勝': 'めいしょう',
+  '滝': 'たき',
+  '渓流': 'けいりゅう',
+  '温泉郷': 'おんせんきょう',
+  '国立公園': 'こくりつこうえん',
+  '国定公園': 'こくていこうえん',
+  '世界遺産': 'せかいいさん',
+  '縁結び': 'えんむすび',
+  '御朱印': 'ごしゅいん',
+  '建立': 'こんりゅう',
+  '創建': 'そうけん',
+  '復元': 'ふくげん',
+  '出陣': 'しゅつじん',
+  '合戦': 'かっせん',
+  '城主': 'じょうしゅ',
+  '藩': 'はん',
+  '藩主': 'はんしゅ',
+  '武将': 'ぶしょう',
+
+  '天守閣': 'てんしゅかく',
+  '天守': 'てんしゅ',
+  '櫓': 'やぐら',
+  '石垣': 'いしがき',
+  '堀': 'ほり',
+  '城郭': 'じょうかく',
+  '城下町': 'じょうかまち',
+  '宿場町': 'しゅくばまち',
+  '門前町': 'もんぜんまち',
+  '神楽': 'かぐら',
+  '神輿': 'みこし',
+  '御輿': 'みこし',
+  '御堂': 'みどう',
+  '参道': 'さんどう',
+  '鳥居': 'とりい',
+  '拝殿': 'はいでん',
+  '本殿': 'ほんでん',
+  '社殿': 'しゃでん',
+  '面影': 'おもかげ',
+  '佇まい': 'たたずまい',
+  '趣': 'おもむき',
+  '眺望': 'ちょうぼう',
+  '渓谷': 'けいこく',
+  '滝壺': 'たきつぼ',
+  '湧水': 'ゆうすい',
+  '棚田': 'たなだ',
+  '茅葺き': 'かやぶき',
+  '合掌造り': 'がっしょうづくり',
+  '青函連絡船': 'せいかんれんらくせん',
+  '青函': 'せいかん',
+  // ── 青森 ──
+  '三内丸山遺跡': 'さんないまるやまいせき',
+  '三内丸山': 'さんないまるやま',
+  '奥入瀬渓流': 'おいらせけいりゅう',
+  '奥入瀬': 'おいらせ',
+  '弘前城': 'ひろさきじょう',
+  '弘前': 'ひろさき',
+  '五所川原': 'ごしょがわら',
+  '鰺ヶ沢': 'あじがさわ',
+  '鯵ヶ沢': 'あじがさわ',
+  '今別': 'いまべつ',
+  '蟹田': 'かにた',
+  '大間': 'おおま',
+  '八甲田': 'はっこうだ',
+  '六戸': 'ろくのへ',
+  '七戸': 'しちのへ',
+  '十和田': 'とわだ',
+  '三沢': 'みさわ',
+  '野辺地': 'のへじ',
+  '鶴田': 'つるた',
+  '板柳': 'いたやなぎ',
+  '黒石': 'くろいし',
+  '田舎館': 'いなかだて',
+  '平内': 'ひらない',
+  '東通': 'ひがしどおり',
+  'むつ市': 'むつし',
+  '大畑': 'おおはた',
+  // ── 岩手 ──
+  '一ノ関': 'いちのせき',
+  '一関': 'いちのせき',
+  '気仙沼': 'けせんぬま',
+  '釜石': 'かまいし',
+  '遠野': 'とおの',
+  '花巻': 'はなまき',
+  '平泉': 'ひらいずみ',
+  '中尊寺': 'ちゅうそんじ',
+  '毛越寺': 'もうつうじ',
+  '宮古': 'みやこ',
+  '久慈': 'くじ',
+  '二戸': 'にのへ',
+  '九戸': 'くのへ',
+  '雫石': 'しずくいし',
+  '葛巻': 'くずまき',
+  // ── 秋田 ──
+  '角館': 'かくのだて',
+  '男鹿': 'おが',
+  '横手': 'よこて',
+  '湯沢': 'ゆざわ',
+  '大曲': 'おおまがり',
+  '鹿角': 'かづの',
+  '仙北': 'せんぼく',
+  '五城目': 'ごじょうめ',
+  '八峰': 'はっぽう',
+  // ── 宮城 ──
+  '多賀城': 'たがじょう',
+  '塩竈': 'しおがま',
+  '塩釜': 'しおがま',
+  '松島': 'まつしま',
+  '石巻': 'いしのまき',
+  '気仙沼': 'けせんぬま',
+  '名取': 'なとり',
+  '利府': 'りふ',
+  // ── 山形 ──
+  '鶴岡': 'つるおか',
+  '酒田': 'さかた',
+  '天童': 'てんどう',
+  '寒河江': 'さがえ',
+  '東根': 'ひがしね',
+  '尾花沢': 'おばなざわ',
+  '最上': 'もがみ',
+  '山寺': 'やまでら',
+  '立石寺': 'りっしゃくじ',
+  // ── 福島 ──
+  '会津若松': 'あいづわかまつ',
+  '磐梯山': 'ばんだいさん',
+  '猪苗代': 'いなわしろ',
+  '只見': 'ただみ',
+  '白河': 'しらかわ',
+  '郡山': 'こおりやま',
+  '相馬': 'そうま',
+  '南相馬': 'みなみそうま',
+  '喜多方': 'きたかた',
+  // ── 関東 ──
+  '日光東照宮': 'にっこうとうしょうぐう',
+  '鬼怒川': 'きぬがわ',
+  '那珂川': 'なかがわ',
+  '筑波': 'つくば',
+  '牛久': 'うしく',
+  '取手': 'とりで',
+  '我孫子': 'あびこ',
+  '柏': 'かしわ',
+  '流山': 'ながれやま',
+  '野田': 'のだ',
+  '鎌ケ谷': 'かまがや',
+  '船橋': 'ふなばし',
+  '習志野': 'ならしの',
+  '八千代': 'やちよ',
+  '四街道': 'よつかいどう',
+  '佐倉': 'さくら',
+  '成田': 'なりた',
+  '銚子': 'ちょうし',
+  '富津': 'ふっつ',
+  '袖ケ浦': 'そでがうら',
+  '君津': 'きみつ',
+  '木更津': 'きさらづ',
+  '館山': 'たてやま',
+  '鴨川': 'かもがわ',
+  '勝浦': 'かつうら',
+  '茂原': 'もばら',
+  '横芝光': 'よこしばひかり',
+  '印西': 'いんざい',
+  '白井': 'しろい',
+  '浦安': 'うらやす',
+  '市原': 'いちはら',
+  '市川': 'いちかわ',
+  '松戸': 'まつど',
+  '本牧': 'ほんもく',
+  '磯子': 'いそご',
+  '金沢区': 'かなざわく',
+  '保土ケ谷': 'ほどがや',
+  '旭区': 'あさひく',
+  '瀬谷': 'せや',
+  '泉区': 'いずみく',
+  '戸塚': 'とつか',
+  '栄区': 'さかえく',
+  '港南区': 'こうなんく',
+  '神奈川区': 'かながわく',
+  '鶴見': 'つるみ',
+  '川崎': 'かわさき',
+  '相模原': 'さがみはら',
+  '厚木': 'あつぎ',
+  '秦野': 'はだの',
+  '伊勢原': 'いせはら',
+  '平塚': 'ひらつか',
+  '茅ヶ崎': 'ちがさき',
+  '藤沢': 'ふじさわ',
+  '鎌倉': 'かまくら',
+  '逗子': 'ずし',
+  '三浦': 'みうら',
+  '大磯': 'おおいそ',
+  '小田原': 'おだわら',
+  '箱根': 'はこね',
+  '湯河原': 'ゆがわら',
+  // ── 北海道 ──
+  '稚内': 'わっかない',
+  '礼文島': 'れぶんとう',
+  '利尻島': 'りしりとう',
+  '利尻': 'りしり',
+  '留萌': 'るもい',
+  '美瑛': 'びえい',
+  '富良野': 'ふらの',
+  '知床': 'しれとこ',
+  '羅臼': 'らうす',
+  '音威子府': 'おといねっぷ',
+  '長万部': 'おしゃまんべ',
+  '弟子屈': 'てしかが',
+  '倶知安': 'くっちゃん',
+  '積丹': 'しゃこたん',
+  '余市': 'よいち',
+  '幌延': 'ほろのべ',
+  '美唄': 'びばい',
+  '歌志内': 'うたしない',
+  '夕張': 'ゆうばり',
+  '岩見沢': 'いわみざわ',
+  '恵庭': 'えにわ',
+  '千歳': 'ちとせ',
+  '苫小牧': 'とまこまい',
+  '室蘭': 'むろらん',
+  '登別': 'のぼりべつ',
+  '函館': 'はこだて',
+  '江差': 'えさし',
+  '帯広': 'おびひろ',
+  '釧路': 'くしろ',
+  '網走': 'あばしり',
+  '紋別': 'もんべつ',
+  '根室': 'ねむろ',
+  '厚岸': 'あっけし',
+  '標津': 'しべつ',
+  '中標津': 'なかしべつ',
+  '別海': 'べっかい',
+  '標茶': 'しべちゃ',
+  '鶴居': 'つるい',
+  '白糠': 'しらぬか',
+  '音別': 'おんべつ',
+  '浦幌': 'うらほろ',
+  '池田': 'いけだ',
+  '芽室': 'めむろ',
+  '士幌': 'しほろ',
+  '鹿追': 'しかおい',
+  '新得': 'しんとく',
+  '音更': 'おとふけ',
+  '更別': 'さらべつ',
+  '様似': 'さまに',
+  '浦河': 'うらかわ',
+  '平取': 'びらとり',
+  '新冠': 'にいかっぷ',
+  '白老': 'しらおい',
+  '砂川': 'すながわ',
+  '奈井江': 'ないえ',
+  '妹背牛': 'もせうし',
+  '秩父別': 'ちっぷべつ',
+  '雨竜': 'うりゅう',
+  '幌加内': 'ほろかない',
+  '増毛': 'ましけ',
+  '羽幌': 'はぼろ',
+  '苫前': 'とままえ',
+  '天塩': 'てしお',
+  '浜頓別': 'はまとんべつ',
+  '中頓別': 'なかとんべつ',
+  '枝幸': 'えさし',
+  '雄武': 'おうむ',
+  '興部': 'おこっぺ',
+  '遠軽': 'えんがる',
+  '北見': 'きたみ',
+  '訓子府': 'くんねっぷ',
+  '置戸': 'おけと',
+  '佐呂間': 'さろま',
+  '湧別': 'ゆうべつ',
+  '滝上': 'たきのうえ',
+  '西興部': 'にしおこっぺ',
+  '旭川': 'あさひかわ',
+  '上川': 'かみかわ',
+  '愛別': 'あいべつ',
+  '当麻': 'とうま',
+  '比布': 'ぴっぷ',
+  '和寒': 'わっさむ',
+  '剣淵': 'けんぶち',
+  '下川': 'しもかわ',
+  '美深': 'びふか',
+  '名寄': 'なよろ',
+  '士別': 'しべつ',
+  'ニセコ': 'にせこ',
+  '蘭越': 'らんこし',
+  '真狩': 'まっかり',
+  '喜茂別': 'きもべつ',
+  '神恵内': 'かもえない',
+  '寿都': 'すっつ',
+  '黒松内': 'くろまつない',
+  '島牧': 'しままき',
+  '宇奈月': 'うなづき',
+  // ── 東北（追加） ──
+  '女川': 'おながわ',
+  '南三陸': 'みなみさんりく',
+  '陸前高田': 'りくぜんたかた',
+  '大船渡': 'おおふなと',
+  '奥州': 'おうしゅう',
+  '八幡平': 'はちまんたい',
+  '西和賀': 'にしわが',
+  '大槌': 'おおつち',
+  '田野畑': 'たのはた',
+  '普代': 'ふだい',
+  '洋野': 'ひろの',
+  '矢巾': 'やはば',
+  '紫波': 'しわ',
+  '金ケ崎': 'かねがさき',
+  '滝沢': 'たきざわ',
+  '住田': 'すみた',
+  '作並': 'さくなみ',
+  '秋保': 'あきう',
+  '鳴子': 'なるこ',
+  '鳴子温泉': 'なるこおんせん',
+  '蔵王': 'ざおう',
+  '仙石': 'せんごく',
+  '雄勝': 'おがつ',
+  '唐桑': 'からくわ',
+  '本吉': 'もとよし',
+  '登米': 'とめ',
+  '加美': 'かみ',
+  '色麻': 'しかま',
+  '涌谷': 'わくや',
+  '大崎': 'おおさき',
+  '栗原': 'くりはら',
+  '名取': 'なとり',
+  '岩沼': 'いわぬま',
+  '亘理': 'わたり',
+  '山元': 'やまもと',
+  '七ヶ浜': 'しちがはま',
+  '松島': 'まつしま',
+  '塩竈': 'しおがま',
+  '多賀城': 'たがじょう',
+  '由利本荘': 'ゆりほんじょう',
+  'にかほ': 'にかほ',
+  '羽後': 'うご',
+  '東成瀬': 'ひがしなるせ',
+  '美郷': 'みさと',
+  '大仙': 'だいせん',
+  '仙北': 'せんぼく',
+  '北秋田': 'きたあきた',
+  '上小阿仁': 'かみこあに',
+  '藤里': 'ふじさと',
+  '三種': 'みたね',
+  '八峰': 'はっぽう',
+  '能代': 'のしろ',
+  '潟上': 'かたがみ',
+  '井川': 'いかわ',
+  '大潟': 'おおがた',
+  '南相馬': 'みなみそうま',
+  '葛尾': 'かつらお',
+  '飯舘': 'いいたて',
+  '浪江': 'なみえ',
+  '双葉': 'ふたば',
+  '大熊': 'おおくま',
+  '富岡': 'とみおか',
+  '川内': 'かわうち',
+  '楢葉': 'ならは',
+  '広野': 'ひろの',
+  '新地': 'しんち',
+  // ── 北陸（追加） ──
+  '砺波': 'となみ',
+  '南砺': 'なんと',
+  '射水': 'いみず',
+  '滑川': 'なめりかわ',
+  '入善': 'にゅうぜん',
+  '朝日': 'あさひ',
+  '上市': 'かみいち',
+  '八尾': 'やつお',
+  '羽咋': 'はくい',
+  '志賀': 'しか',
+  '宝達志水': 'ほうだつしみず',
+  '中能登': 'なかのと',
+  '穴水': 'あなみず',
+  '能登島': 'のとじま',
+  '千里浜': 'ちりはま',
+  '三方五湖': 'みかたごこ',
+  '若狭湾': 'わかさわん',
+  '越前海岸': 'えちぜんかいがん',
+  // ── 甲信越（追加） ──
+  '塩尻': 'しおじり',
+  '伊那': 'いな',
+  '駒ヶ根': 'こまがね',
+  '茅野': 'ちの',
+  '岡谷': 'おかや',
+  '辰野': 'たつの',
+  '小布施': 'おぶせ',
+  '野沢温泉': 'のざわおんせん',
+  '飯山': 'いいやま',
+  '信濃': 'しなの',
+  '菅平': 'すがだいら',
+  '四阿山': 'あずまやさん',
+  '浅間山': 'あさまやま',
+  '軽井沢': 'かるいざわ',
+  '小諸': 'こもろ',
+  '東御': 'とうみ',
+  '御代田': 'みよた',
+  '立科': 'たてしな',
+  '南木曽': 'なぎそ',
+  '上松': 'あげまつ',
+  '大桑': 'おおくわ',
+  '木祖': 'きそ',
+  '王滝': 'おうたき',
+  '阿智': 'あち',
+  '昼神': 'ひるがみ',
+  '天龍': 'てんりゅう',
+  '南アルプス': 'みなみアルプス',
+  '北杜': 'ほくと',
+  '韮崎': 'にらさき',
+  '甲斐': 'かい',
+  '笛吹': 'ふえふき',
+  '昇仙峡': 'しょうせんきょう',
+  '精進湖': 'しょうじこ',
+  '本栖湖': 'もとすこ',
+  '忍野': 'おしの',
+  '道志': 'どうし',
+  '丹波山': 'たばやま',
+  '小菅': 'こすげ',
+  '都留': 'つる',
+  // ── 関東（追加） ──
+  '那須塩原': 'なすしおばら',
+  '那須': 'なす',
+  '矢板': 'やいた',
+  '鹿沼': 'かぬま',
+  '壬生': 'みぶ',
+  '上三川': 'かみのかわ',
+  '真岡': 'もおか',
+  '益子': 'ましこ',
+  '茂木': 'もてぎ',
+  '足利': 'あしかが',
+  '佐野': 'さの',
+  '栃木': 'とちぎ',
+  '小山': 'おやま',
+  '下野': 'しもつけ',
+  '八幡宮': 'はちまんぐう',
+  '前橋': 'まえばし',
+  '桐生': 'きりゅう',
+  '伊勢崎': 'いせさき',
+  '館林': 'たてばやし',
+  '渋川': 'しぶかわ',
+  '草津温泉': 'くさつおんせん',
+  '嬬恋': 'つまごい',
+  '水上': 'みなかみ',
+  '谷川岳': 'たにがわだけ',
+  '赤城山': 'あかぎさん',
+  '榛名山': 'はるなさん',
+  '妙義山': 'みょうぎさん',
+  '下仁田': 'しもにた',
+  '安中': 'あんなか',
+  '東吾妻': 'ひがしあがつま',
+  '吾妻': 'あがつま',
+  '長野原': 'ながのはら',
+  '秩父': 'ちちぶ',
+  '飯能': 'はんのう',
+  '入間': 'いるま',
+  '狭山': 'さやま',
+  '毛呂山': 'もろやま',
+  '越生': 'おごせ',
+  '東秩父': 'ひがしちちぶ',
+  '小鹿野': 'おがの',
+  '本庄': 'ほんじょう',
+  '深谷': 'ふかや',
+  '熊谷': 'くまがや',
+  '行田': 'ぎょうだ',
+  '羽生': 'はにゅう',
+  '加須': 'かぞ',
+  '幸手': 'さって',
+  '宮代': 'みやしろ',
+  '越谷': 'こしがや',
+  '八潮': 'やしお',
+  '三郷': 'みさと',
+  '吉川': 'よしかわ',
+  '松伏': 'まつぶし',
+  '偕楽園': 'かいらくえん',
+  '笠間': 'かさま',
+  '桜川': 'さくらがわ',
+  '常陸': 'ひたち',
+  '常陸太田': 'ひたちおおた',
+  '常陸大宮': 'ひたちおおみや',
+  '大子': 'だいご',
+  '那珂': 'なか',
+  '鉾田': 'ほこた',
+  '行方': 'なめがた',
+  '潮来': 'いたこ',
+  '稲敷': 'いなしき',
+  '阿見': 'あみ',
+  '守谷': 'もりや',
+  '坂東': 'ばんどう',
+  '古河': 'こが',
+  '下妻': 'しもつま',
+  '常総': 'じょうそう',
+  '筑西': 'ちくせい',
+  '結城': 'ゆうき',
+  '八千代': 'やちよ',
+  '四街道': 'よつかいどう',
+  '印西': 'いんざい',
+  '白井': 'しろい',
+  // ── 新潟 ──
+  '佐渡島': 'さどがしま',
+  '佐渡': 'さど',
+  '萬代橋': 'ばんだいばし',
+  '万代橋': 'ばんだいばし',
+  '弥彦': 'やひこ',
+  '弥彦山': 'やひこやま',
+  '弥彦神社': 'やひこじんじゃ',
+  '粟島': 'あわしま',
+  '瀬波': 'せなみ',
+  '関川': 'せきかわ',
+  '胎内': 'たいない',
+  '聖籠': 'せいろう',
+  '阿賀野': 'あがの',
+  '阿賀': 'あが',
+  '魚沼': 'うおぬま',
+  '南魚沼': 'みなみうおぬま',
+  '湯沢': 'ゆざわ',
+  '苗場': 'なえば',
+  '八海山': 'はっかいさん',
+  '越後': 'えちご',
+  '親不知': 'おやしらず',
+  '糸魚川': 'いといがわ',
+  '上越': 'じょうえつ',
+  '妙高': 'みょうこう',
+  '十日町': 'とおかまち',
+  '津南': 'つなん',
+  '清津峡': 'きよつきょう',
+  // ── 中部 ──
+  '高山': 'たかやま',
+  '白川郷': 'しらかわごう',
+  '五箇山': 'ごかやま',
+  '立山': 'たてやま',
+  '黒部': 'くろべ',
+  '魚津': 'うおづ',
+  '氷見': 'ひみ',
+  '七尾': 'ななお',
+  '輪島': 'わじま',
+  '珠洲': 'すず',
+  '能登': 'のと',
+  '加賀': 'かが',
+  '小松': 'こまつ',
+  '白山': 'はくさん',
+  '勝山': 'かつやま',
+  '越前': 'えちぜん',
+  '敦賀': 'つるが',
+  '若狭': 'わかさ',
+  '小浜': 'おばま',
+  '諏訪': 'すわ',
+  '松本': 'まつもと',
+  '上田': 'うえだ',
+  '千曲': 'ちくま',
+  '飯田': 'いいだ',
+  '木曽': 'きそ',
+  '乗鞍': 'のりくら',
+  '穂高': 'ほたか',
+  '安曇野': 'あずみの',
+  '大町': 'おおまち',
+  // ── 関西 ──
+  '祇園': 'ぎおん',
+  '清水寺': 'きよみずでら',
+  '金閣寺': 'きんかくじ',
+  '銀閣寺': 'ぎんかくじ',
+  '伏見稲荷': 'ふしみいなり',
+  '嵐山': 'あらしやま',
+  '嵯峨野': 'さがの',
+  '天橋立': 'あまのはしだて',
+  '舞鶴': 'まいづる',
+  '宮津': 'みやづ',
+  '篠山': 'ささやま',
+  '丹波篠山': 'たんばささやま',
+  '姫路': 'ひめじ',
+  '明石': 'あかし',
+  '加古川': 'かこがわ',
+  '西宮': 'にしのみや',
+  '芦屋': 'あしや',
+  '宝塚': 'たからづか',
+  '伊丹': 'いたみ',
+  '尼崎': 'あまがさき',
+  '豊中': 'とよなか',
+  '吹田': 'すいた',
+  '枚方': 'ひらかた',
+  '茨木': 'いばらき',
+  '高槻': 'たかつき',
+  '守口': 'もりぐち',
+  '門真': 'かどま',
+  '東大阪': 'ひがしおおさか',
+  '四天王寺': 'してんのうじ',
+  '通天閣': 'つうてんかく',
+  '住吉大社': 'すみよしたいしゃ',
+  '難波': 'なんば',
+  '梅田': 'うめだ',
+  '天満': 'てんま',
+  '鶴橋': 'つるはし',
+  '堺': 'さかい',
+  '岸和田': 'きしわだ',
+  '泉佐野': 'いずみさの',
+  '和泉': 'いずみ',
+  '河内長野': 'かわちながの',
+  '富田林': 'とんだばやし',
+  '羽曳野': 'はびきの',
+  '松原': 'まつばら',
+  '柏原': 'かしわら',
+  '大和高田': 'やまとたかだ',
+  '大和郡山': 'やまとこおりやま',
+  '天理': 'てんり',
+  '橿原': 'かしはら',
+  '桜井': 'さくらい',
+  '吉野': 'よしの',
+  '十津川': 'とつかわ',
+  '五條': 'ごじょう',
+  // ── 中国 ──
+  '出雲': 'いずも',
+  '境港': 'さかいみなと',
+  '宍道湖': 'しんじこ',
+  '皆生温泉': 'かいけおんせん',
+  '倉吉': 'くらよし',
+  '米子': 'よなご',
+  '松江': 'まつえ',
+  '津和野': 'つわの',
+  '萩': 'はぎ',
+  '下関': 'しものせき',
+  '宇部': 'うべ',
+  '防府': 'ほうふ',
+  '柳井': 'やない',
+  '光': 'ひかり',
+  '周南': 'しゅうなん',
+  '岩国': 'いわくに',
+  '廿日市': 'はつかいち',
+  '竹原': 'たけはら',
+  '三原': 'みはら',
+  '尾道': 'おのみち',
+  '福山': 'ふくやま',
+  '府中': 'ふちゅう',
+  '庄原': 'しょうばら',
+  '三次': 'みよし',
+  '江田島': 'えたじま',
+  '呉': 'くれ',
+  // ── 四国 ──
+  '高知': 'こうち',
+  '四万十': 'しまんと',
+  '足摺岬': 'あしずりみさき',
+  '室戸岬': 'むろとみさき',
+  '安芸': 'あき',
+  '土佐': 'とさ',
+  '宿毛': 'すくも',
+  '須崎': 'すさき',
+  '佐川': 'さかわ',
+  '越知': 'おち',
+  '仁淀川': 'によどがわ',
+  '土佐清水': 'とさしみず',
+  '徳島': 'とくしま',
+  '鳴門': 'なると',
+  '脇町': 'わきまち',
+  '阿波池田': 'あわいけだ',
+  '剣山': 'つるぎさん',
+  '祖谷': 'いや',
+  '松山': 'まつやま',
+  '道後温泉': 'どうごおんせん',
+  '今治': 'いまばり',
+  '新居浜': 'にいはま',
+  '西条': 'さいじょう',
+  '宇和島': 'うわじま',
+  '大洲': 'おおず',
+  '内子': 'うちこ',
+  '八幡浜': 'やわたはま',
+  '高松': 'たかまつ',
+  '丸亀': 'まるがめ',
+  '坂出': 'さかいで',
+  '善通寺': 'ぜんつうじ',
+  '観音寺': 'かんおんじ',
+  '三豊': 'みとよ',
+  '小豆島': 'しょうどしま',
+  // ── 九州 ──
+  '湯布院': 'ゆふいん',
+  '別府': 'べっぷ',
+  '指宿': 'いぶすき',
+  '霧島': 'きりしま',
+  '屋久島': 'やくしま',
+  '奄美': 'あまみ',
+  '久米島': 'くめじま',
+  '宮古島': 'みやこじま',
+  '石垣島': 'いしがきじま',
+  '西表島': 'いりおもてじま',
+  '与那国': 'よなぐに',
+  '阿蘇': 'あそ',
+  '黒川温泉': 'くろかわおんせん',
+  '菊池': 'きくち',
+  '天草': 'あまくさ',
+  '人吉': 'ひとよし',
+  '球磨': 'くま',
+  '水俣': 'みなまた',
+  '八代': 'やつしろ',
+  '宇城': 'うき',
+  '合志': 'こうし',
+  '玉名': 'たまな',
+  '荒尾': 'あらお',
+  '大牟田': 'おおむた',
+  '柳川': 'やながわ',
+  '八女': 'やめ',
+  '朝倉': 'あさくら',
+  '糸島': 'いとしま',
+  '宮若': 'みやわか',
+  '飯塚': 'いいづか',
+  '田川': 'たがわ',
+  '豊前': 'ぶぜん',
+  '行橋': 'ゆくはし',
+  '中間': 'なかま',
+  '直方': 'のおがた',
+  '嘉麻': 'かま',
+  '小城': 'おぎ',
+  '多久': 'たく',
+  '伊万里': 'いまり',
+  '有田': 'ありた',
+  '武雄': 'たけお',
+  '鹿島': 'かしま',
+  '嬉野': 'うれしの',
+  '諫早': 'いさはや',
+  '島原': 'しまばら',
+  '雲仙': 'うんぜん',
+  '平戸': 'ひらど',
+  '松浦': 'まつうら',
+  '壱岐': 'いき',
+  '対馬': 'つしま',
+  '五島': 'ごとう',
+  '日向': 'ひゅうが',
+  '延岡': 'のべおか',
+  '都城': 'みやこのじょう',
+  'えびの': 'えびの',
+  '小林': 'こばやし',
+  '串間': 'くしま',
+  '日南': 'にちなん',
+  '鹿屋': 'かのや',
+  '垂水': 'たるみず',
+  '志布志': 'しぶし',
+  '曽於': 'そお',
+  '伊佐': 'いさ',
+  '出水': 'いずみ',
+  '薩摩川内': 'さつませんだい',
+  '阿久根': 'あくね',
+  '枕崎': 'まくらざき',
+  '南さつま': 'みなみさつま',
+  '南九州市': 'みなみきゅうしゅうし',
+  // ── 観光スポット（固有名詞） ──
+  '厳島神社': 'いつくしまじんじゃ',
+  '熊野古道': 'くまのこどう',
+  '那智の滝': 'なちのたき',
+  '高野山': 'こうやさん',
+  '法隆寺': 'ほうりゅうじ',
+  '東大寺': 'とうだいじ',
+  '春日大社': 'かすがたいしゃ',
+  '唐招提寺': 'とうしょうだいじ',
+  '薬師寺': 'やくしじ',
+  '興福寺': 'こうふくじ',
+  '飛鳥': 'あすか',
+  '平城宮': 'へいじょうきゅう',
+  '二条城': 'にじょうじょう',
+  '東福寺': 'とうふくじ',
+  '南禅寺': 'なんぜんじ',
+  '龍安寺': 'りょうあんじ',
+  '仁和寺': 'にんなじ',
+  '鹿苑寺': 'ろくおんじ',
+  '慈照寺': 'じしょうじ',
+  '比叡山': 'ひえいざん',
+  '延暦寺': 'えんりゃくじ',
+  '三十三間堂': 'さんじゅうさんげんどう',
+  '伏見桃山': 'ふしみももやま',
+  '平等院': 'びょうどういん',
+  '宇治': 'うじ',
+  '貴船': 'きぶね',
+  '鞍馬': 'くらま',
+  '大原': 'おおはら',
+  '寂光院': 'じゃっこういん',
+  '三千院': 'さんぜんいん',
+  '醍醐寺': 'だいごじ',
+  '山科': 'やましな',
+  '西陣': 'にしじん',
+  '上賀茂': 'かみがも',
+  '下鴨': 'しもがも',
+  '御所': 'ごしょ',
+};
+
+// 長い地名から先にマッチさせるためキーを長さ降順でソート済みの配列を作成
+const PLACE_READINGS_SORTED = Object.keys(PLACE_READINGS).sort((a, b) => b.length - a.length);
+
+/**
+ * ツール返答テキストに地名の読みを付与して誤読を防ぐ
+ * 例: "弘前城" → "弘前城（ひろさきじょう）"
+ * すでに（）が付いている箇所は二重付与しない
+ */
+function applyPlaceReadings(text) {
+  if (!text) return text;
+  let result = text;
+  for (const place of PLACE_READINGS_SORTED) {
+    if (!result.includes(place)) continue;
+    // 漢字・読み括弧が後続する場合はスキップ
+    // 例:「弘前城（ひろさきじょう）」の中の「弘前」や、既に付与済みの「弘前（ひろさき）」を二重変換しない
+    const replaceRegex = new RegExp(place + '(?![\u4E00-\u9FFF\u3400-\u4DBF（])', 'g');
+    result = result.replace(replaceRegex, `${place}（${PLACE_READINGS[place]}）`);
+  }
+  return result;
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  天気情報取得（Open-Meteo / 無料・APIキー不要）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -573,13 +1392,70 @@ async function fetchWeather(location, date = 'today') {
 //  交通情報取得（ODPT公共交通オープンデータ）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function getNavitimeKey() {
-  return document.getElementById('navitimeKey')?.value.trim() ||
-         localStorage.getItem(NAVITIME_STORAGE_KEY) || '';
-}
 function getPlacesKey() {
   return document.getElementById('placesKey')?.value.trim() ||
          localStorage.getItem(PLACES_STORAGE_KEY) || '';
+}
+function getYahooKey() {
+  return document.getElementById('yahooKey')?.value.trim() ||
+         localStorage.getItem(YAHOO_STORAGE_KEY) || '';
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  ふりがな付与（Yahoo ルビ振りAPI → ローカル辞書フォールバック）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function applyFurigana(text) {
+  if (!text) return text;
+
+  const appId = getYahooKey();
+  if (!appId) {
+    console.info('[furigana] Yahoo App ID 未設定 → ローカル辞書のみ使用');
+    return applyPlaceReadings(text);
+  }
+
+  console.info('[furigana] Yahoo API 呼び出し開始（App ID先頭8文字:', appId.slice(0,8), '）');
+  try {
+    const resp = await fetch('https://jlp.yahooapis.jp/FuriganaService/V2/furigana', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-AppId': appId
+      },
+      body: JSON.stringify({
+        id: '1',
+        jsonrpc: '2.0',
+        method: 'jlp.furiganaservice.furigana',
+        params: { q: text, grade: 1 }
+      })
+    });
+    console.info('[furigana] HTTPステータス:', resp.status);
+    if (resp.ok) {
+      const data = await resp.json();
+      console.info('[furigana] レスポンス:', JSON.stringify(data).slice(0, 200));
+      const words = data.result?.word || [];
+      if (words.length > 0) {
+        const annotated = words.map(w => {
+          const surface = w.surface || '';
+          const furigana = w.furigana || '';
+          if (furigana && /[一-鿿㐀-䶿]/.test(surface)) {
+            return `${surface}（${furigana}）`;
+          }
+          return surface;
+        }).join('');
+        console.info('[furigana] Yahoo API 適用完了 → ローカル辞書も重ね適用');
+        return applyPlaceReadings(annotated);
+      } else {
+        console.warn('[furigana] Yahoo API: wordsが空 → ローカル辞書で代替');
+      }
+    } else {
+      const errText = await resp.text();
+      console.warn('[furigana] Yahoo API エラー応答:', resp.status, errText.slice(0, 200));
+    }
+  } catch (e) {
+    console.warn('[furigana] Yahoo API 例外 → ローカル辞書で代替:', e.message);
+  }
+
+  return applyPlaceReadings(text);
 }
 
 
@@ -659,7 +1535,7 @@ async function fetchPlaces(query) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  ルート案内（OpenStreetMap Nominatim → NAVITIME）
+//  ルート案内
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ── OpenStreetMap Nominatim によるジオコーディング（無料・キー不要・ブラウザ対応）
 async function geocodeStation(stationName, fetcher = fetch) {
@@ -696,328 +1572,6 @@ async function geocodeStation(stationName, fetcher = fetch) {
 }
 
 // ルートカード用 Blob URL を構造化データから生成
-function buildRouteBlobFromData(fromStation, toStation, routeData, depTime, depDate) {
-  // Google マップ 乗換案内 URL（号数確認用）
-  const _r0 = routeData[0] || {};
-  let gmapsUrl;
-  if (depTime && /^\d{1,2}:\d{2}$/.test(depTime)) {
-    const _now = new Date();
-    const _jst = new Date(_now.getTime() + 9 * 3600 * 1000);
-    let [_y, _m, _d] = _jst.toISOString().slice(0, 10).split('-').map(Number);
-    if (depDate === 'tomorrow') {
-      const _t = new Date(Date.UTC(_y, _m - 1, _d + 1));
-      _y = _t.getUTCFullYear(); _m = _t.getUTCMonth() + 1; _d = _t.getUTCDate();
-    }
-    const [_hh, _mm] = depTime.split(':').map(Number);
-    const _epoch = Math.floor(new Date(_y, _m - 1, _d, _hh, _mm).getTime() / 1000);
-    gmapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(fromStation + '駅')}&destination=${encodeURIComponent(toStation + '駅')}&travelmode=transit&hl=ja&dirflg=r`;
-  } else {
-    gmapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(fromStation + '駅')}&destination=${encodeURIComponent(toStation + '駅')}&travelmode=transit&hl=ja`;
-  }
-
-  const routeCards = routeData.map((r, idx) => {
-    const fareHtml = ''; // 運賃は乗車券のみで特急料金等が含まれないため非表示
-
-    const segHtml = r.segments.map(seg => `
-      <div class="seg train">
-        <div class="seg-from">${seg.fromStn}${seg.ft ? '<span class="tm">' + seg.ft + '発</span>' : ''}</div>
-        <div class="seg-line">🚃 ${seg.line}</div>
-        <div class="seg-to">${seg.toStn}${seg.tt ? '<span class="tm">' + seg.tt + '着</span>' : ''}</div>
-      </div>`).filter(s => s.trim()).join('<div class="transfer">🔄 乗換</div>');
-
-    return `<div class="route-card ${idx === 0 ? 'best' : ''}">
-      <div class="route-hdr">
-        <span class="rnum">ルート${idx + 1}${idx === 0 ? ' ⭐' : ''}</span>
-        <span class="rtime">所要 <b>${r.duration}</b></span>
-        ${fareHtml}
-        <span class="rdep">${r.dep ? r.dep + ' 発 → ' + r.arr + ' 着' : ''}</span>
-      </div>
-      <div class="route-from-to">🚉 ${r.fromName} → ${r.toName}</div>
-      <div class="segments">${segHtml}</div>
-    </div>`;
-  }).join('');
-
-  const html = `<!DOCTYPE html>
-<html lang="ja"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>${fromStation} → ${toStation} ルート案内</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;background:#e8f5e9;min-height:100vh}
-  .hdr{background:#2e7d32;color:#fff;padding:12px 16px;text-align:center;font-size:16px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.2)}
-  .body{padding:16px;max-width:520px;margin:0 auto;width:100%}
-  .page-title{text-align:center;font-size:18px;font-weight:700;color:#1b5e20;margin:12px 0 16px;padding:12px;background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
-  .route-card{background:#fff;border-radius:14px;margin-bottom:14px;box-shadow:0 2px 10px rgba(0,0,0,.08);overflow:hidden}
-  .route-card.best{border:2px solid #2e7d32}
-  .route-hdr{background:#f1f8e9;padding:10px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .rnum{font-weight:700;color:#2e7d32;font-size:14px}
-  .rtime{font-size:15px;color:#333}
-  .rtime b{font-size:20px;color:#1b5e20}
-  .rfare{font-size:13px;color:#555;background:#c8e6c9;border-radius:6px;padding:2px 7px}
-  .rdep{font-size:13px;color:#555;margin-left:auto;white-space:nowrap}
-  .route-from-to{font-size:13px;font-weight:600;color:#2e7d32;padding:6px 16px 0;border-top:1px solid #f1f8e9}
-  .segments{padding:10px 16px 12px}
-  .seg.train{background:#f9fbe7;border-radius:10px;padding:10px 12px;margin:6px 0}
-  .seg-from,.seg-to{font-size:14px;font-weight:600;color:#333}
-  .seg-line{font-size:13px;color:#2e7d32;margin:4px 0;padding-left:4px}
-  .tm{font-size:13px;font-weight:400;color:#666;margin-left:6px}
-  .transfer{text-align:center;font-size:12px;color:#aaa;padding:3px 0}
-  .src{font-size:11px;color:#aaa;text-align:center;padding:10px 0 20px}
-  .gmaps-top{display:block;text-align:center;background:#1565c0;color:#fff;border-radius:12px;padding:11px;margin-bottom:14px;font-size:14px;font-weight:700;text-decoration:none}
-</style></head>
-<body>
-  <div class="hdr">🚉 ${fromStation} → ${toStation} ルート案内</div>
-  <div class="body">
-    <div class="page-title">🚉 ${fromStation} → ${toStation}</div>
-    <a class="gmaps-top" href="${gmapsUrl}" target="_blank">🗺 Google マップで号数・詳細を確認する</a>
-    ${routeCards}
-    <div class="src">データ: NAVITIME</div>
-  </div>
-</body></html>`;
-
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  setTimeout(() => URL.revokeObjectURL(url), 120000);
-  return url;
-}
-async function fetchRoute(fromStation, toStation, departureTime = null, departureDate = 'today') {
-  // 所要時間フォーマット: 165 → "2時間45分"
-  const fmtMin = m => {
-    if (m == null || isNaN(m)) return '不明';
-    const h = Math.floor(m / 60), mn = m % 60;
-    if (h > 0 && mn > 0) return `${h}時間${mn}分`;
-    if (h > 0) return `${h}時間`;
-    return `${mn}分`;
-  };
-  // 新幹線路線名テーブル
-  const SHINKANSEN_LINE = {
-    'のぞみ':'東海道新幹線','ひかり':'東海道新幹線','こだま':'東海道新幹線',
-    'みずほ':'山陽新幹線','さくら':'山陽新幹線','つばめ':'九州新幹線',
-    'はやぶさ':'東北新幹線','はやて':'東北新幹線','やまびこ':'東北新幹線','なすの':'東北新幹線',
-    'つばさ':'山形新幹線','こまち':'秋田新幹線',
-    'かがやき':'北陸新幹線','はくたか':'北陸新幹線','つるぎ':'北陸新幹線','あさま':'北陸新幹線',
-    'とき':'上越新幹線','たにがわ':'上越新幹線'
-  };
-  const navKey = getNavitimeKey();
-  if (!navKey) return { text: 'NAVITIME APIキーが未設定です。接続前にNAVITIMEキー欄に入力してください。', blobUrl: null, gmapsFallback: null };
-
-  // タイムアウト付きfetch（Geminiのtoolレスポンス待ち時間内に収める）
-  const fetchWithTimeout = (fetchUrl, options = {}, ms = 8000) => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), ms);
-    return fetch(fetchUrl, { ...options, signal: ctrl.signal })
-      .finally(() => clearTimeout(timer));
-  };
-
-  // ① 出発地・目的地をジオコーディング（並列・タイムアウト付き）
-  let fromLoc, toLoc;
-  try {
-    [fromLoc, toLoc] = await Promise.all([
-      geocodeStation(fromStation, fetchWithTimeout),
-      geocodeStation(toStation,   fetchWithTimeout)
-    ]);
-  } catch (e) {
-    return { text: `位置情報の取得に失敗しました: ${e.message}`, blobUrl: null, gmapsFallback: null };
-  }
-
-  // ② 出発日時を JST の ISO 8601 文字列に変換
-  //    departure_time が指定されていれば その時刻を使用、なければ現在時刻
-  const now = new Date();
-  const jst = new Date(now.getTime() + 9 * 3600 * 1000);
-  let startTime;
-  if (departureTime && /^\d{1,2}:\d{2}$/.test(departureTime)) {
-    // 指定時刻: 今日 or 明日の日付 + 指定時刻
-    const baseDate = jst.toISOString().slice(0, 10); // YYYY-MM-DD (JST)
-    let [yyyy, mm, dd] = baseDate.split('-').map(Number);
-    if (departureDate === 'tomorrow') {
-      const d = new Date(Date.UTC(yyyy, mm - 1, dd + 1));
-      yyyy = d.getUTCFullYear(); mm = d.getUTCMonth() + 1; dd = d.getUTCDate();
-    }
-    const pad2 = n => String(n).padStart(2, '0');
-    startTime = `${yyyy}-${pad2(mm)}-${pad2(dd)}T${departureTime}:00`;
-  } else {
-    startTime = jst.toISOString().slice(0, 19);
-  }
-
-  // ③ NAVITIME ルート検索
-  // ※ Content-Type は GET リクエストに不要 → CORS プリフライトを回避するため除去
-  const params = new URLSearchParams({
-    start:      `${fromLoc.lat},${fromLoc.lng}`,
-    goal:       `${toLoc.lat},${toLoc.lng}`,
-    datum:      'wgs84',
-    term:       '1440',
-    limit:      '5',
-    start_time: startTime,
-    coord_unit: 'degree'
-  });
-
-  const navUrl = `https://navitime-route-totalnavi.p.rapidapi.com/route_transit?${params}`;
-  let resp;
-  try {
-    resp = await fetchWithTimeout(navUrl, {
-      method: 'GET',
-      headers: {
-        'x-rapidapi-host': 'navitime-route-totalnavi.p.rapidapi.com',
-        'x-rapidapi-key':  navKey
-      }
-    }, 10000);
-  } catch (e) {
-    const msg = e.name === 'AbortError' ? 'タイムアウト（10秒）' : e.message;
-    return { text: `NAVITIME通信エラー: ${msg}。localhost環境ではCORSの問題が発生する場合があります。`, blobUrl: null, gmapsFallback: null };
-  }
-
-  // ④ レスポンス解析（JSON以外が返ってくる場合も安全に処理）
-  let data;
-  try {
-    data = await resp.json();
-  } catch (e) {
-    return { text: 'NAVITIMEのレスポンスが不正です（JSONではありません）。APIキーを確認してください。', blobUrl: null, gmapsFallback: null };
-  }
-  console.info('[NAVITIME route] status:', resp.status, 'body:', JSON.stringify(data).slice(0, 400));
-
-  if (!resp.ok) {
-    const errMsg = data?.message || data?.error || `HTTP ${resp.status}`;
-    return { text: `NAVITIME APIエラー: ${errMsg}`, blobUrl: null, gmapsFallback: null };
-  }
-
-  const allItems = data.items || [];
-  // 空路除外: move タイプが train/walk/bus/transfer 以外のセクションを含むルートを除外
-  // 空路検出: 明示的な空路指標のみ（未知のmove型を誤判定しない）
-  const hasAir = item => (item.sections || []).some(sec => {
-    const m = (sec.move || '').toLowerCase();
-    const t = (sec.transport?.name || '');
-    if (t.includes('空路')) return true;                       // 日本語「空路」
-    if (/航空|エアライン/i.test(t)) return true;              // 航空・エアライン
-    if (/airdo|skymark|peach|jetstar|starflyer|solaseed/i.test(t)) return true; // LCC名
-    if (/^(ana|jal|ibex|air do)$/i.test(t.trim())) return true; // 航空会社略称（完全一致）
-    if (m === 'airplane' || m === 'plane' || m === 'air') return true;
-    return false;  // 新幹線・特急など未知のmove型は地上交通として扱う
-  });
-  const trainItems = allItems.filter(item => !hasAir(item));
-  if (trainItems.length === 0) {
-    return { text: `${fromStation}から${toStation}へは現在の時間帯に鉄道ルートが見つかりませんでした。出発時刻を変更するか、Google マップでご確認ください。`, routeLines: [], routeData: [] };
-  }
-  const items = trainItems.slice(0, 3);
-  if (!items.length) return { text: `${fromStation}から${toStation}へのルートが見つかりませんでした。`, blobUrl: null, gmapsFallback: null };
-
-  // ⑤ ISO 8601 → HH:MM 変換ヘルパー
-  const toHHMM = t => {
-    if (!t) return '';
-    // "2026-05-04T18:47:00+09:00" → "18:47"
-    if (t.includes('T')) return t.split('T')[1].slice(0, 5);
-    // "18:47:00" → "18:47"
-    return t.slice(0, 5);
-  };
-
-  // ⑥ ルートを日本語に整形（Geminiへ渡す文字列を簡潔に保つ）
-  const routeLines = items.slice(0, 3).map((item, idx) => {
-    const s    = item.summary || {};
-    const move = s.move || {};
-    const fare = move.fare?.unit_0 ?? move.fare?.unit_1 ?? '不明';
-    const dep  = toHHMM(s.from?.time || '');
-    const arr  = toHHMM(s.to?.time  || '');
-    // 所要時間: move.time は待ち時間込みのため、出発〜到着時刻から乗車時間を計算
-    const calcMinutes = (d, a) => {
-      if (!d || !a) return null;
-      const [dh, dm] = d.split(':').map(Number);
-      const [ah, am] = a.split(':').map(Number);
-      const diff = (ah * 60 + am) - (dh * 60 + dm);
-      return diff >= 0 ? diff : diff + 1440; // 日をまたぐ場合の補正
-    };
-    const rideMin = calcMinutes(dep, arr);
-    const time = rideMin != null ? fmtMin(rideMin) : (move.time != null ? fmtMin(move.time) : '不明');
-
-    const trains = (item.sections || [])
-      .filter(sec => sec.type === 'move' && sec.move !== 'walk')
-      .map(sec => {
-        const tName = sec.transport?.name || '電車';
-        const tNum  = sec.transport?.number || sec.transport?.code || '';
-        const tLine = SHINKANSEN_LINE[tName] ? `${SHINKANSEN_LINE[tName]}・` : '';
-        const tDisp = tLine + tName + (tNum ? `${tNum}号` : '');
-        const dir   = sec.transport?.direction ? `(${sec.transport.direction})` : '';
-        const ft    = toHHMM(sec.from_time);
-        const tt    = toHHMM(sec.to_time);
-        return `${sec.from_name || ''}${ft ? ft + '発' : ''}→[${tDisp}${dir}]→${sec.to_name || ''}${tt ? tt + '着' : ''}`;
-      }).join('|乗換|');
-
-    const fareStr = fare !== '不明' ? `${fare}円` : '運賃不明';
-    return `ルート${idx + 1}: 所要${time} ${fareStr} (${dep}→${arr}) ${trains}`;
-  });
-
-  const text = `${fromStation}→${toStation}: ${routeLines.join(' / ')}`;
-
-  // ⑦ 構造化データ（Blobカード用）─ サマリーの from/to name + セクション時刻を利用
-  const routeData = items.slice(0, 3).map((item) => {
-    const s2    = item.summary || {};
-    const move2 = s2.move || {};
-    const fare2 = move2.fare?.unit_0 ?? move2.fare?.unit_1 ?? null;
-
-    const fromName2 = s2.from?.name || fromStation;
-    const toName2   = s2.to?.name   || toStation;
-
-    // 時刻: サマリー優先 → 先頭/末尾セクションで補完
-    const allMoves  = (item.sections || []).filter(s => s.type === 'move');
-    const firstSec  = allMoves[0];
-    const lastSec   = allMoves[allMoves.length - 1];
-    const dep2 = toHHMM(s2.from?.time || firstSec?.from_time || '');
-    const arr2 = toHHMM(s2.to?.time   || lastSec?.to_time    || '');
-
-    const calcMin2 = (d, a) => {
-      if (!d || !a) return null;
-      const [dh, dm] = d.split(':').map(Number);
-      const [ah, am] = a.split(':').map(Number);
-      const diff = (ah * 60 + am) - (dh * 60 + dm);
-      return diff >= 0 ? diff : diff + 1440;
-    };
-    const rideMin2 = calcMin2(dep2, arr2);
-    const dur2 = rideMin2 != null ? fmtMin(rideMin2) : (move2.time != null ? fmtMin(move2.time) : '不明');
-
-    // 全セクション（walk含む）の時刻→駅名マップを作成（中間駅補完用）
-    const allSecsForMap = item.sections || [];
-    const timeToStn = {};
-    const isRealName = s => s && s.trim().length > 0 && !/^\d+$/.test(s.trim());
-    allSecsForMap.forEach(sec => {
-      const fn = (sec.from_name || '').trim();
-      const tn = (sec.to_name   || '').trim();
-      const ft2 = toHHMM(sec.from_time);
-      const tt2 = toHHMM(sec.to_time);
-      if (isRealName(fn) && ft2) timeToStn[ft2] = fn;
-      if (isRealName(tn) && tt2) timeToStn[tt2] = tn;
-    });
-
-    const trainSecs = allSecsForMap.filter(s => s.type === 'move' && s.move !== 'walk');
-    const segments2 = trainSecs.map((sec, si) => {
-      const ft = toHHMM(sec.from_time);
-      const tt = toHHMM(sec.to_time);
-      const rawFrom = isRealName(sec.from_name) ? sec.from_name.trim() : '';
-      const rawTo   = isRealName(sec.to_name)   ? sec.to_name.trim()   : '';
-
-      const fromStn = rawFrom
-                   || timeToStn[ft]
-                   || (si === 0 ? fromName2 : '');
-
-      // 中間到着駅: 時刻マップ → 最終駅サマリー → 方面ヒューリスティック("XX方面"→"XX")
-      const dirStation = sec.transport?.direction
-                           ? sec.transport.direction.replace(/方面$/, '').trim() : '';
-      const toStn = rawTo
-                 || timeToStn[tt]
-                 || (si === trainSecs.length - 1 ? toName2 : '')
-                 || (si < trainSecs.length - 1 ? dirStation : '');
-
-      const trainName = sec.transport?.name || '電車';
-      const trainNum  = sec.transport?.number || sec.transport?.code || '';
-      const shinLine  = SHINKANSEN_LINE[trainName] ? `${SHINKANSEN_LINE[trainName]}` : '';
-      const dir = sec.transport?.direction ? `（${sec.transport.direction}）` : '';
-      const line = (shinLine ? shinLine + ' ' : '') + trainName + (trainNum ? `${trainNum}号` : '') + dir;
-
-      return { fromStn, ft, line, toStn, tt };
-    });
-
-    return { fromName: fromName2, toName: toName2, dep: dep2, arr: arr2, duration: dur2, fare: fare2, segments: segments2 };
-  });
-
-  return { text, routeLines, routeData };
-}
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  音声再生
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1451,7 +2005,6 @@ async function handleServerMsg(msg) {
     apiRowEl.style.display = 'none';
 
     // APIキー状態の表示（GitHub公開用に非表示）
-    // const routeReady = !!getNavitimeKey();
     // const statusParts = [...];
     // appendBubble('APIキー状態: ...', 'system');
 
@@ -1761,7 +2314,6 @@ async function handleServerMsg(msg) {
           const rFrom = call.args?.from_station || '';
           const rTo   = call.args?.to_station   || '';
           appendBubble(`🗺 ルート検索中…（${rFrom} → ${rTo}）`, 'system');
-          // Googleマップ乗換案内のみを案内（NAVITIMEカードは非表示）
           const gmFallbackUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(rFrom + '駅')}&destination=${encodeURIComponent(rTo + '駅')}&travelmode=transit&hl=ja`;
           pendingLinks.push({ text: `🗺 Google マップで乗換案内を見る（${rFrom}→${rTo}）`, url: gmFallbackUrl, embedUrl: null });
           output = `${rFrom}から${rTo}のルートをGoogleマップでご案内します。リンクからご確認ください。`;
@@ -1781,6 +2333,7 @@ async function handleServerMsg(msg) {
         output = `天気情報の取得に失敗しました: ${e.message}`;
         console.warn('[toolCall error]', e);
       }
+      output = await applyFurigana(output);  // Yahoo ルビ振りAPI（またはローカル辞書）で誤読を防ぐ
       return { id: call.id, name: call.name, response: { output } };
     }));
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1904,10 +2457,10 @@ startBtn.addEventListener('click', async () => {
     return;
   }
   localStorage.setItem(STORAGE_KEY, key);
-  const navitimeKey = document.getElementById('navitimeKey').value.trim();
-  if (navitimeKey) localStorage.setItem(NAVITIME_STORAGE_KEY, navitimeKey);
   const placesKey = document.getElementById('placesKey').value.trim();
   if (placesKey) localStorage.setItem(PLACES_STORAGE_KEY, placesKey);
+  const yahooKey = document.getElementById('yahooKey').value.trim();
+  if (yahooKey) localStorage.setItem(YAHOO_STORAGE_KEY, yahooKey);
   // AudioContext をユーザー操作中（クリックイベント内）に事前生成し
   // 無音バッファを再生してブラウザのオートプレイ制限を確実に解除する
   try {
