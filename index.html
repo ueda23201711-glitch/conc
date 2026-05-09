@@ -238,6 +238,7 @@ let placesApiLinksAdded = false;  // Places APIが個別リンクを返したタ
 let lastUserQuery = '';     // 最後のユーザー発話テキスト（ツール未使用時のGoogle検索用）
 let googleLinkScheduled = false; // Google検索リンクの重複追加防止フラグ
 let greetingComplete  = false;   // 挨拶ターン完了後フラグ（最初のturnComplete後にtrue）
+let greetingRetryTimer = null;  // 挨拶リトライタイマー（turnCompleteでキャンセル）
 let userSpokeInTurn   = false;   // そのターンで本物のinputTranscriptionを受信したか
 let lastInputWasText  = false;   // 最後の入力がテキストだったか（音声入力の補正スキップ・遅延短縮用）
 
@@ -1408,34 +1409,52 @@ async function fetchWeather(location, date = 'today') {
   const lat = parseFloat(best.lat);
   const lon = parseFloat(best.lon);
 
-  // ② リバースジオコーディングで都道府県を確実に取得（zoom=6=都道府県レベル）
-  let prefecture = '';
-  try {
-    const revUrl = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=ja&zoom=6&addressdetails=1`;
-    const revResp = await fetchWithTimeout(revUrl, { headers: { 'Accept-Language': 'ja', 'Accept': 'application/json' } });
-    const revData = await revResp.json();
-    prefecture = revData?.address?.state || revData?.address?.county || revData?.name || '';
-    console.info('[weather] prefecture from reverse geocode:', prefecture);
-  } catch(e) {
-    console.warn('[weather] reverse geocode failed:', e.message);
-    // フォールバック: forward search の address から取得
-    prefecture = best.address?.state || best.address?.county || '';
-  }
-
-  // ③ 都道府県名 → 気象庁エリアコード
-  let areaCode = null;
-  if (prefecture) {
+  // ② 都道府県名を取得（優先順：forward geocoding state → reverse geocoding state → county）
+  // JMA_AREA_CODE のキーに照合して正規化する関数
+  const matchPrefecture = (raw) => {
+    if (!raw) return null;
     for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
-      if (prefecture.includes(key) || key.includes(prefecture.replace(/[都道府県道]$/, ''))) {
-        areaCode = code; break;
+      if (raw === key || raw.includes(key) || key.includes(raw.replace(/[都道府県道振興局].*$/, '').slice(0, 3))) {
+        return { name: key, code };
       }
     }
+    return null;
+  };
+
+  let prefecture = '';
+  let areaCode = null;
+
+  // まず forward geocoding の address.state を試す（最も信頼性が高い）
+  const fwdState = best.address?.state || '';
+  const fwdMatch = matchPrefecture(fwdState);
+  if (fwdMatch) {
+    prefecture = fwdMatch.name;
+    areaCode   = fwdMatch.code;
+    console.info('[weather] prefecture from forward geocode:', prefecture);
   }
+
+  // 次に reverse geocoding（zoom=5 = state レベル）
+  if (!areaCode) {
+    try {
+      const revUrl = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=ja&zoom=5&addressdetails=1`;
+      const revResp = await fetchWithTimeout(revUrl, { headers: { 'Accept-Language': 'ja', 'Accept': 'application/json' } });
+      const revData = await revResp.json();
+      // state → county → name の順に試し、JMA_AREA_CODE に照合できたものだけ採用
+      for (const raw of [revData?.address?.state, revData?.address?.county, revData?.name]) {
+        const m = matchPrefecture(raw);
+        if (m) { prefecture = m.name; areaCode = m.code; break; }
+      }
+      console.info('[weather] prefecture from reverse geocode:', prefecture || '(not found)');
+    } catch(e) {
+      console.warn('[weather] reverse geocode failed:', e.message);
+    }
+  }
+
   // フォールバック: display_name 全文に都道府県名が含まれるか
   if (!areaCode) {
     const displayFull = best.display_name || '';
     for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
-      if (displayFull.includes(key)) { areaCode = code; break; }
+      if (displayFull.includes(key)) { prefecture = key; areaCode = code; break; }
     }
   }
   // フォールバック: 入力地名から都道府県を推定
@@ -1443,7 +1462,7 @@ async function fetchWeather(location, date = 'today') {
     for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
       const bare = key.replace(/[都道府県]$/, '');
       if (bare && (location.includes(bare) || location.includes(key))) {
-        areaCode = code; break;
+        prefecture = key; areaCode = code; break;
       }
     }
   }
@@ -1451,7 +1470,7 @@ async function fetchWeather(location, date = 'today') {
     return { text: `「${location}」の都道府県を特定できませんでした（例: 仙台市、青森市、東京など都市名で入力してください）`, blobUrl: null };
   }
 
-  // エリア表示名（都道府県名優先）
+  // エリア表示名は必ず JMA_AREA_CODE の正式都道府県名を使う
   const areaName_pre = prefecture || displayName;
 
   // 週間天気（明後日以降）は気象庁の週間予報ページへ誘導
@@ -2193,15 +2212,17 @@ async function handleServerMsg(msg) {
           }
         };
         sendGreeting();
-        // 4秒待っても音声バブルが出なければ挨拶を再送（1回のみ）
-        setTimeout(() => {
+        // 6秒待っても音声バブルが出なければ挨拶を再送（1回のみ）
+        // turnComplete 受信時にキャンセルするため greetingRetryTimer に保存
+        greetingRetryTimer = setTimeout(() => {
+          greetingRetryTimer = null;
           // '.row.assistant .bubble' で AI バブルを検出（.bubble.ai は存在しない）
           const bubbles = document.querySelectorAll('.row.assistant .bubble');
           if (bubbles.length === 0 && !pendingBubble && !lastFinishedBubble && ws && ws.readyState === WebSocket.OPEN) {
             console.info('[greeting] 再送');
             sendGreeting();
           }
-        }, 4000);
+        }, 6000);
       }
     });
     return;
@@ -2323,7 +2344,15 @@ async function handleServerMsg(msg) {
       // ツールが呼ばれたかどうかをこの時点で確定（inputTranscriptionより先に確認できる）
       const _toolWasCalled = pendingLinks.length > 0;
       const _isGreetedNow  = greetingComplete;  // 挨拶ターン自体ではなく、その完了後に true になる
-      if (isGreeted && !greetingComplete) greetingComplete = true;  // 挨拶ターン完了をマーク
+      if (isGreeted && !greetingComplete) {
+        greetingComplete = true;  // 挨拶ターン完了をマーク
+        // 挨拶が正常に完了したのでリトライタイマーをキャンセル
+        if (greetingRetryTimer !== null) {
+          clearTimeout(greetingRetryTimer);
+          greetingRetryTimer = null;
+          console.info('[greeting] リトライタイマーキャンセル（挨拶完了）');
+        }
+      }
       // ツール呼び出し分のリンクはすぐ表示
       if (pendingLinks.length > 0) {
         pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
@@ -2581,6 +2610,7 @@ function doDisconnect() {
   pendingLinks          = [];
   isGreeted            = false;
   greetingComplete     = false;
+  if (greetingRetryTimer !== null) { clearTimeout(greetingRetryTimer); greetingRetryTimer = null; }
   userSpokeInTurn      = false;
   sessionActive        = false;
   googleLinkScheduled  = false;
