@@ -296,6 +296,190 @@ function escHtml(s) {
 }
 
 // 新タブで「会話に戻る」バナー付きラッパーページを開く
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  天気パネル（blob HTML）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// 天気コード → 絵文字（JMA weatherCode 基準）
+function wxEmoji(code, text) {
+  const c = parseInt(code) || 0;
+  const t = (text || '').replace(/\s+/g, '');
+  // コードベース判定
+  if (c) {
+    if ([407,408,306,308].includes(c)) return '🌀';
+    if (c >= 400) return t.includes('雨') ? '🌨' : '❄️';
+    if ([350,208,219,240,323,324,325].includes(c) || (c>=300 && t.includes('雷'))) return '⛈';
+    if (c >= 300) return (t.includes('雪') || t.includes('みぞれ')) ? '🌨' : '🌧';
+    if (c >= 200) return t.includes('雨') ? '🌦' : t.includes('晴') ? '⛅' : '☁️';
+    if (c >= 100) return t.includes('雨') ? '🌦' : t.includes('雪') ? '🌨' : t.includes('曇') ? '⛅' : '☀️';
+  }
+  // テキストベース判定
+  if (t.includes('暴風') || t.includes('台風')) return '🌀';
+  if (t.includes('雷')) return '⛈';
+  if (t.includes('雪') && t.includes('雨')) return '🌨';
+  if (t.includes('雪')) return '❄️';
+  if (t.includes('雨') && (t.includes('晴') || t.includes('曇'))) return '🌦';
+  if (t.includes('雨')) return '🌧';
+  if (t.includes('曇') && t.includes('晴')) return '⛅';
+  if (t.includes('曇')) return '☁️';
+  if (t.includes('晴')) return '☀️';
+  if (t.includes('霧')) return '🌫';
+  return '🌡';
+}
+
+// 天気テキストを短縮表示用に変換（最大8文字）
+function wxShort(text) {
+  if (!text) return '–';
+  const t = text.replace(/\s+/g, '').replace(/　/g,'');
+  // 特定パターンをまず置換
+  const reps = [
+    [/晴れのち(時々|一時)?曇り?/, '晴→曇'],
+    [/晴れのち(時々|一時)?雨/, '晴→雨'],
+    [/晴れのち(時々|一時)?雪/, '晴→雪'],
+    [/曇り?のち(時々|一時)?晴れ?/, '曇→晴'],
+    [/曇り?のち(時々|一時)?雨/, '曇→雨'],
+    [/曇り?のち(時々|一時)?雪/, '曇→雪'],
+    [/雨のち(時々|一時)?晴れ?/, '雨→晴'],
+    [/雨のち(時々|一時)?曇り?/, '雨→曇'],
+    [/雪のち(時々|一時)?晴れ?/, '雪→晴'],
+    [/晴れ時々曇り?/, '晴時々曇'],
+    [/晴れ時々雨/, '晴時々雨'],
+    [/曇り?時々晴れ?/, '曇時々晴'],
+    [/曇り?時々雨/, '曇時々雨'],
+    [/曇り?時々雪/, '曇時々雪'],
+    [/雨時々(曇り?|晴れ?)/, '雨時々曇'],
+    [/晴れ一時(曇り?|雨|雪)/, m => '晴一時'+m.replace(/晴れ一時/,'')],
+    [/曇り?一時(晴れ?|雨|雪)/, m => '曇一時'+m.replace(/曇り?一時/,'')],
+  ];
+  for (const [pat, rep] of reps) {
+    const m = t.match(pat);
+    if (m) return typeof rep === 'function' ? rep(m[0]) : rep;
+  }
+  // そのまま先頭8文字
+  return t.slice(0, 8);
+}
+
+// 曜日
+function weekday(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00+09:00');
+  return ['日','月','火','水','木','金','土'][d.getDay()];
+}
+
+// 天気パネルを blob HTML として新タブで開く
+function openWeatherPanel(wd) {
+  // wd: { areaName, jmaUrl, today, tomorrow, weekly[] }
+  // today/tomorrow: { date, wx, wxCode, tmax, tmin, pop }
+  // weekly[]: { date, wx, wxCode, tmax, tmin, pop }
+
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  const cardHtml = (label, d) => {
+    const em = wxEmoji(d.wxCode, d.wx);
+    const wx = wxShort(d.wx);
+    const tempPart = d.tmax !== '--' && d.tmin !== '--'
+      ? `<span class="tmax">↑${d.tmax}°</span> <span class="tmin">↓${d.tmin}°</span>`
+      : d.tmax !== '--' ? `<span class="tmax">↑${d.tmax}°</span>`
+      : d.tmin !== '--' ? `<span class="tmin">↓${d.tmin}°</span>` : '';
+    const popPart = d.pop !== '--' ? `<span class="pop">☔${d.pop}%</span>` : '';
+    return `<div class="card">
+      <div class="card-label">${esc(label)}</div>
+      <div class="card-emoji">${em}</div>
+      <div class="card-wx">${esc(wx)}</div>
+      <div class="card-temps">${tempPart} ${popPart}</div>
+    </div>`;
+  };
+
+  const weekRows = (wd.weekly || []).map(d => {
+    const em = wxEmoji(d.wxCode, d.wx);
+    const sh = wxShort(d.wx);
+    const mm = d.date.slice(5,7).replace(/^0/,'');
+    const dd = d.date.slice(8,10).replace(/^0/,'');
+    const wd2 = weekday(d.date);
+    const sat = wd2==='土' ? ' sat' : '';
+    const sun = wd2==='日' ? ' sun' : '';
+    return `<tr>
+      <td class="wk-date${sat}${sun}">${mm}/${dd}<br><small>${wd2}</small></td>
+      <td class="wk-wx">${em}<br><small>${esc(sh)}</small></td>
+      <td class="wk-tmp">${d.tmax!=='--'?'<span class="tmax">↑'+esc(d.tmax)+'°</span>':''}<br>${d.tmin!=='--'?'<span class="tmin">↓'+esc(d.tmin)+'°</span>':''}</td>
+      <td class="wk-pop">${d.pop!=='--'?esc(d.pop)+'%':'–'}</td>
+    </tr>`;
+  }).join('');
+
+  const todayLabel = (() => {
+    const d = new Date(wd.today.date + 'T00:00:00+09:00');
+    return `今日（${d.getMonth()+1}/${d.getDate()}）`;
+  })();
+  const tomorrowLabel = (() => {
+    const d = new Date(wd.tomorrow.date + 'T00:00:00+09:00');
+    return `明日（${d.getMonth()+1}/${d.getDate()}）`;
+  })();
+
+  const html = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>${esc(wd.areaName)}の天気</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;background:#f0f4f8;overflow-x:hidden}
+.hdr{background:#2e7d32;color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.2);position:sticky;top:0;z-index:10}
+.back{background:#fff;color:#2e7d32;border:none;padding:9px 18px;border-radius:9px;font-weight:700;font-size:15px;cursor:pointer;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.12)}
+.back:active{opacity:.8}
+.ttl{flex:1;font-size:15px;font-weight:700;opacity:.95}
+.content{padding:16px;max-width:480px;margin:0 auto}
+.cards{display:flex;gap:12px;margin-bottom:16px}
+.card{flex:1;background:#fff;border-radius:14px;padding:14px 10px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.card-label{font-size:12px;color:#666;font-weight:600;margin-bottom:6px}
+.card-emoji{font-size:42px;margin:4px 0}
+.card-wx{font-size:13px;color:#444;margin:4px 0;min-height:1.4em}
+.card-temps{font-size:14px;font-weight:600;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:6px}
+.tmax{color:#e53e3e}
+.tmin{color:#3182ce}
+.pop{color:#6b46c1;font-size:13px;font-weight:500}
+.section-title{font-size:13px;font-weight:700;color:#555;margin-bottom:8px;letter-spacing:.03em}
+.week-table{width:100%;background:#fff;border-radius:14px;box-shadow:0 2px 8px rgba(0,0,0,.08);overflow:hidden;border-collapse:collapse}
+.week-table th{background:#2e7d32;color:#fff;font-size:12px;padding:8px 4px;text-align:center;font-weight:600}
+.week-table td{padding:8px 4px;text-align:center;font-size:13px;border-bottom:1px solid #f0f0f0}
+.week-table tr:last-child td{border-bottom:none}
+.wk-date{font-size:12px;font-weight:600;white-space:nowrap}
+.wk-wx{font-size:12px}
+.wk-pop{font-size:12px;color:#6b46c1}
+.sat{color:#2563eb}
+.sun{color:#dc2626}
+.jma-link{display:block;text-align:center;margin-top:20px;padding:14px;background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08);color:#2e7d32;text-decoration:none;font-size:14px;font-weight:600}
+.jma-link:active{opacity:.8}
+.footer{text-align:center;color:#aaa;font-size:11px;margin-top:16px;padding-bottom:24px}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <button class="back" onclick="if(opener&&!opener.closed){opener.focus();}window.close()">← 会話に戻る</button>
+  <span class="ttl">☁ ${esc(wd.areaName)}の天気</span>
+</div>
+<div class="content">
+  <div class="cards">
+    ${cardHtml(todayLabel, wd.today)}
+    ${cardHtml(tomorrowLabel, wd.tomorrow)}
+  </div>
+  <div class="section-title">📅 週間天気予報</div>
+  <table class="week-table">
+    <thead><tr><th>日付</th><th>天気</th><th>気温</th><th>降水%</th></tr></thead>
+    <tbody>${weekRows}</tbody>
+  </table>
+  <a class="jma-link" href="${esc(wd.jmaUrl)}" target="_blank">🌐 気象庁公式ページで詳細を確認 ↗</a>
+  <div class="footer">データ出典：気象庁天気予報API</div>
+</div>
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const blobUrl = URL.createObjectURL(blob);
+  window.open(blobUrl, '_blank');
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+}
+
 // embedUrl: iframeに表示するURL（Maps Embed API など）
 // fallbackUrl: embedUrlがない場合に直接開くURL
 // title: ラッパーページのタイトル
@@ -387,6 +571,10 @@ function appendBubbleWithLinks(items, role) {
       a.style.cssText = 'color:var(--green);text-decoration:underline;word-break:break-all;cursor:pointer;';
       a.addEventListener('click', e => {
         e.preventDefault();
+        if (item.weatherPanel) {
+          openWeatherPanel(item.weatherPanel);
+          return;
+        }
         const title = item.text.replace(/^\S+\s*/, '').slice(0, 30);
         openInWrapper(item.embedUrl || null, item.url, title);
       });
@@ -1604,7 +1792,65 @@ async function fetchWeather(location, date = 'today') {
 
   // 気象庁公式予報ページへの直接リンク
   const jmaPageUrl = `https://www.jma.go.jp/bosai/forecast/#area_type=offices&area_code=${areaCode}`;
-  return { text, blobUrl: jmaPageUrl };
+
+  // ── 週間天気データ抽出 ──
+  const _jstNow2 = new Date(Date.now() + 9*3600*1000);
+  const _todayStr2 = _jstNow2.toISOString().slice(0,10);
+  const _tomStr2   = new Date(_jstNow2.getTime()+86400000).toISOString().slice(0,10);
+
+  // 今日・明日カードデータ
+  const _todayCard = {
+    date: _todayStr2, wx: todayWx, wxCode: ts[0].areas[0].weatherCodes?.[0] || '',
+    tmax: todayTmax, tmin: '--', pop: String(todayRain)
+  };
+  const _tomCard = {
+    date: _tomStr2, wx: tomorrowWx, wxCode: ts[0].areas[0].weatherCodes?.[1] || '',
+    tmax: tomorrowTmax, tmin: tomorrowTmin, pop: String(tomorrowRain)
+  };
+
+  // 週間データ（jmaData[1]）
+  const _weekly = [];
+  try {
+    const _wkTs = jmaData[1]?.timeSeries || [];
+    const _wxSer = _wkTs[0];
+    const _wxDefs = _wxSer?.timeDefines || [];
+    const _wxAr   = _wxSer?.areas?.[0];
+    // 気温 series を探す（tempsMax/tempsMin を持つもの）
+    let _tSer = null;
+    for (const _s of _wkTs) { if (_s.areas?.[0]?.tempsMax) { _tSer = _s; break; } }
+    const _tDefs = _tSer?.timeDefines || [];
+    const _tAr   = _tSer?.areas?.[0];
+    // 降水確率 series（pops を持つもの）
+    let _pSer = null;
+    for (const _s of _wkTs) { if (_s.areas?.[0]?.pops) { _pSer = _s; break; } }
+    const _pDefs = _pSer?.timeDefines || [];
+    const _pAr   = _pSer?.areas?.[0];
+
+    _wxDefs.forEach((_dt, _i) => {
+      const _day = _dt.slice(0,10);
+      const _wxTxt = (_wxAr?.weathers?.[_i] || '').replace(/\s+/g,'');
+      const _wxCd  = _wxAr?.weatherCodes?.[_i] || '';
+      const _tIdx  = _tDefs.findIndex(_d => _d.slice(0,10) === _day);
+      const _pIdx  = _pDefs.findIndex(_d => _d.slice(0,10) === _day);
+      _weekly.push({
+        date: _day,
+        wx: _wxTxt, wxCode: _wxCd,
+        tmax: _tIdx>=0 ? (_tAr?.tempsMax?.[_tIdx] ?? '--') : '--',
+        tmin: _tIdx>=0 ? (_tAr?.tempsMin?.[_tIdx] ?? '--') : '--',
+        pop:  _pIdx>=0 ? (_pAr?.pops?.[_pIdx] ?? '--') : '--',
+      });
+    });
+  } catch(_e) { console.warn('[weather] weekly extract error:', _e); }
+
+  const weatherData = {
+    areaName: areaName_pre,
+    jmaUrl: jmaPageUrl,
+    today: _todayCard,
+    tomorrow: _tomCard,
+    weekly: _weekly,
+  };
+
+  return { text, blobUrl: jmaPageUrl, weatherData };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2481,15 +2727,16 @@ async function handleServerMsg(msg) {
           output = wxResult.text;
           console.info('[weather]', output);
           // ターン完了後に天気カードリンクをキューに積む（気象庁データ）
-          if (wxResult.blobUrl && output && !output.includes('失敗') && !output.includes('見つかりません')) {
+          if (wxResult.weatherData && output && !output.includes('失敗') && !output.includes('見つかりません')) {
             const isTomorrow = (call.args?.date === 'tomorrow');
             const isWeekly = (call.args?.date === 'weekly');
-            const weatherLabel = isWeekly ? '📅 気象庁の週間天気予報を見る'
-              : isTomorrow ? '🌤 気象庁で明日の天気予報を見る' : '🌤 気象庁で今日の天気予報を見る';
+            const weatherLabel = isWeekly ? '📅 週間天気予報を見る'
+              : isTomorrow ? '🌤 明日の天気予報を見る（週間付き）' : '🌤 今日の天気予報を見る（週間付き）';
             pendingLinks.push({
               text: weatherLabel,
               url: wxResult.blobUrl,
-              embedUrl: null
+              embedUrl: null,
+              weatherPanel: wxResult.weatherData   // パネル表示用データ
             });
           }
         } else if (call.name === 'get_current_datetime') {
