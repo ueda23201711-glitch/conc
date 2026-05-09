@@ -2336,6 +2336,11 @@ async function handleServerMsg(msg) {
         if (b.dataset.state === 'empty' || b.dataset.state === 'indicator') {
           b.textContent = t;
           b.dataset.state = 'text';
+          // Places API個別リンクがあれば、テキスト表示開始と同時に表示（吹き出しの下に出す）
+          if (placesApiLinksAdded && pendingLinks.length > 0) {
+            pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
+            pendingLinks = [];
+          }
         } else {
           // 追加転写 or 直前バブルへの追記
           b.textContent += t;
@@ -2350,6 +2355,10 @@ async function handleServerMsg(msg) {
           [...fullText.matchAll(/【([^】]{2,20})】/g)].forEach(m => {
             const name = m[1];
             if (!streamingSpotLinks.has(name)) {
+              // 最初のスポットリンク生成時: 汎用📍リンク（検索クエリ等）は不要なので除去
+              if (streamingSpotLinks.size === 0) {
+                pendingLinks = pendingLinks.filter(l => !l.text.startsWith('📍'));
+              }
               streamingSpotLinks.add(name);
               appendBubbleWithLinks([{
                 text: `📍 ${name} をGoogle マップで見る`,
@@ -2421,19 +2430,18 @@ async function handleServerMsg(msg) {
         const _b = _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1];
         _b.textContent = _b.textContent.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
       }
-      // 次ターン用リセット
-      placesApiLinksAdded = false;
-      streamingSpotLinks = new Set();
-      toolCalledThisTurn = false;
-
-      // 残った pendingLinks を表示（通常はツール応答時点で表示済みなので空のはず）
+      // 残った pendingLinks を表示（通常は転写開始時点で表示済みなので空のはず）
       if (pendingLinks.length > 0) {
         pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
         pendingLinks = [];
       }
 
-      // ツールが呼ばれたかどうか
-      const _toolWasCalled = toolCalledThisTurn; // ツールが実際に呼ばれたターンか
+      // ツールが呼ばれたかどうか（リセット前に読む）
+      const _toolWasCalled = toolCalledThisTurn;
+      // 次ターン用リセット
+      placesApiLinksAdded = false;
+      streamingSpotLinks = new Set();
+      toolCalledThisTurn = false;
       const _isGreetedNow  = greetingComplete;  // 挨拶ターン自体ではなく、その完了後に true になる
       if (isGreeted && !greetingComplete) {
         greetingComplete = true;  // 挨拶ターン完了をマーク
@@ -2636,12 +2644,7 @@ async function handleServerMsg(msg) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
     }
-    // ツール応答確定直後に既定リンクを即座に表示（音声再生前でも見せる）
-    // Places個別リンク・ルートリンク・検索リンク等をここで先行表示する
-    if (pendingLinks.length > 0) {
-      pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
-      pendingLinks = [];
-    }
+    // リンクはテキスト転写開始時（最初のoutputTranscription）に表示する
   }
 }
 
