@@ -410,6 +410,9 @@ function ensureAiBubble() {
   return pendingBubble;
 }
 
+let lastFinishedBubble = null;   // 直前に確定したAIバブル
+let lastBubbleFinishTime = 0;    // 確定した時刻（転写遅延検出用）
+
 function finishAiBubble() {
   if (!pendingBubble) return;
   pendingBubble.classList.remove('typing');
@@ -418,6 +421,8 @@ function finishAiBubble() {
     pendingBubble.textContent = '（音声応答）';
   }
   pendingBubble.dataset.state = 'done';
+  lastFinishedBubble  = pendingBubble;
+  lastBubbleFinishTime = Date.now();
   pendingBubble = null;
   scrollBottom();
 }
@@ -1516,7 +1521,10 @@ async function fetchWeather(location, date = 'today') {
   const rainStr = rain !== '--' ? `、降水確率${rain}%` : '';
   // 気象庁データは都道府県レベルなので、都道府県名で案内する
   const areaName = prefecture || displayName;
-  const text = `${areaName}の${dateLabel}: ${cond}${tempStr}${rainStr}（気象庁データ）`;
+  // 案内指示をテキストに含め、Geminiが都道府県名を使うよう誘導する
+  const text = `${areaName}の${dateLabel}: ${cond}${tempStr}${rainStr}（気象庁データ）` +
+    `\n【重要】天気を案内する際は必ず「${areaName}」と都道府県名で伝えること。` +
+    `市区町村名（例：石巻・仙台など）ではなく「${areaName}」を使うこと。`;
 
   // 気象庁公式予報ページへの直接リンク
   const jmaPageUrl = `https://www.jma.go.jp/bosai/forecast/#area_type=offices&area_code=${areaCode}`;
@@ -2249,13 +2257,18 @@ async function handleServerMsg(msg) {
     if (sc.outputTranscription) {
       const t = (sc.outputTranscription.text || '').trim();
       if (t) {
-        const b = ensureAiBubble();
-        if (b.dataset.state !== 'text') {
-          // 初回転写：インジケーター（🔊）または空を置き換え
+        // turnComplete 後に転写が遅れて届いた場合（500ms以内）は直前のバブルに追記
+        let b;
+        if (!pendingBubble && lastFinishedBubble && (Date.now() - lastBubbleFinishTime) < 500) {
+          b = lastFinishedBubble;
+        } else {
+          b = ensureAiBubble();
+        }
+        if (b.dataset.state === 'empty' || b.dataset.state === 'indicator') {
           b.textContent = t;
           b.dataset.state = 'text';
         } else {
-          // 追加転写：末尾に追記
+          // 追加転写 or 直前バブルへの追記
           b.textContent += t;
         }
         scrollBottom();
