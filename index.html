@@ -1580,14 +1580,24 @@ async function fetchWeather(location, date = 'today') {
   const dd = targetDate.getUTCDate();
   const dateLabel = date === 'tomorrow' ? `${mm}月${dd}日（明日）の天気予報` : `${mm}月${dd}日（今日）の天気予報`;
 
-  const tempStr = (tmax !== '--' || tmin !== '--')
-    ? `、最高${tmax !== '--' ? tmax + '°C' : '−'}／最低${tmin !== '--' ? tmin + '°C' : '−'}`
-    : '';
+  const tempStr = tmax !== '--' && tmin !== '--'
+    ? `、最高${tmax}°C／最低${tmin}°C`
+    : tmax !== '--'
+      ? `、最高${tmax}°C`
+      : tmin !== '--'
+        ? `、最低${tmin}°C`
+        : '';
   const rainStr = rain !== '--' ? `、降水確率${rain}%` : '';
   // 気象庁データは都道府県レベルなので、都道府県名で案内する
   const areaName = areaName_pre;
   // ツールテキストは「都道府県名で」という形に固定し、Geminiの言い換えを防ぐ
-  const tempInstruction = (tmax !== '--' || tmin !== '--') ? '最高気温・最低気温を必ず返答に含めること。' : '（気温データなし）';
+  const tempInstruction = tmax !== '--' && tmin !== '--'
+    ? '最高気温・最低気温を必ず返答に含めること。'
+    : tmax !== '--'
+      ? '最高気温のみ返答に含めること。最低気温は不明なので言及しないこと。'
+      : tmin !== '--'
+        ? '最低気温のみ返答に含めること。最高気温は不明なので言及しないこと。'
+        : '（気温データなし）';
   const text = `【天気案内指示】必ず「${areaName}」と都道府県名で案内すること。「${areaName}」以外の地名（石狩振興局・石狩地方・振興局・地方など細分地域名）は絶対に使わないこと。${tempInstruction}` +
     `\n${areaName}の${dateLabel}: ${cond}${tempStr}${rainStr}（気象庁データ）`;
 
