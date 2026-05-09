@@ -2195,8 +2195,9 @@ async function handleServerMsg(msg) {
         sendGreeting();
         // 4秒待っても音声バブルが出なければ挨拶を再送（1回のみ）
         setTimeout(() => {
-          const bubbles = document.querySelectorAll('.bubble.ai');
-          if (bubbles.length === 0 && ws && ws.readyState === WebSocket.OPEN) {
+          // '.row.assistant .bubble' で AI バブルを検出（.bubble.ai は存在しない）
+          const bubbles = document.querySelectorAll('.row.assistant .bubble');
+          if (bubbles.length === 0 && !pendingBubble && !lastFinishedBubble && ws && ws.readyState === WebSocket.OPEN) {
             console.info('[greeting] 再送');
             sendGreeting();
           }
