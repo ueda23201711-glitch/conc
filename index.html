@@ -2342,39 +2342,53 @@ async function handleServerMsg(msg) {
       }
     }
 
+    // 生成完了（音声再生中・テキスト表示直後）→ リンクを即座に表示
+    // generationComplete は turnComplete より先に来るため、音声再生中にリンクを出せる
+    if (sc.generationComplete) {
+      const _gcBubbles = chatEl.querySelectorAll('.row.assistant .bubble');
+      const _gcText = _gcBubbles.length > 0
+        ? _gcBubbles[_gcBubbles.length - 1].textContent : '';
+      const _gcSpotMatches = [..._gcText.matchAll(/【([^】]{2,20})】/g)];
+
+      // 【スポット名】→ 個別 Google マップリンクを生成（まだ pendingLinks になければ）
+      if (_gcSpotMatches.length > 0 && !placesApiLinksAdded) {
+        pendingLinks = pendingLinks.filter(l => !l.text.startsWith('📍'));
+        _gcSpotMatches.forEach(m => {
+          const spotName = m[1];
+          pendingLinks.push({
+            text: `📍 ${spotName} をGoogle マップで見る`,
+            url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spotName)}`,
+            embedUrl: null
+          });
+        });
+      }
+      // AIバブルから【】タグ・ふりがなを除去
+      if (_gcBubbles.length > 0) {
+        const _gcB = _gcBubbles[_gcBubbles.length - 1];
+        _gcB.textContent = _gcB.textContent.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
+      }
+      // pendingLinks をここで表示（音声再生中でもすぐ見せる）
+      if (pendingLinks.length > 0) {
+        pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
+        pendingLinks = [];
+      }
+      placesApiLinksAdded = false;
+    }
+
     // ターン完了
     if (sc.turnComplete) {
       finishAiBubble();
 
-      // AIの回答テキストから【スポット名】を検出して個別マップリンクを生成
-      // Places APIが個別リンクを返した場合はスキップ（フラグで管理）
-      const _lastAiBubbleForLinks = chatEl.querySelectorAll('.row.assistant .bubble');
-      const _aiBubbleText = _lastAiBubbleForLinks.length > 0
-        ? _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1].textContent : '';
-      const _spotMatches = [..._aiBubbleText.matchAll(/【([^】]{2,20})】/g)];
-      if (_spotMatches.length > 0) {
-        if (!placesApiLinksAdded) {
-          // Places APIリンクがない場合のみ：汎用リンクを除去して個別リンクを追加
-          pendingLinks = pendingLinks.filter(l => !l.text.startsWith('📍'));
-          _spotMatches.forEach(m => {
-            const spotName = m[1];
-            pendingLinks.push({
-              text: `📍 ${spotName} をGoogle マップで見る`,
-              url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spotName)}`,
-              embedUrl: null
-            });
-          });
-        }
-        // AIバブルから【】タグを除去して見やすくする（APIあり・なし両方）
-        if (_lastAiBubbleForLinks.length > 0) {
-          const _b = _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1];
-          _b.textContent = _b.textContent.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
-        }
+      // generationComplete で処理済みのためスポット検出・リンク表示は省略
+      // （generationComplete が来なかった場合の安全網としてリンクが残っていれば表示）
+      if (pendingLinks.length > 0) {
+        pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
+        pendingLinks = [];
       }
-      placesApiLinksAdded = false;  // 次ターンのためにリセット
+      placesApiLinksAdded = false;  // 次ターンのためにリセット（念のため）
 
       // ツールが呼ばれたかどうかをこの時点で確定（inputTranscriptionより先に確認できる）
-      const _toolWasCalled = pendingLinks.length > 0;
+      const _toolWasCalled = false; // generationComplete で処理済み
       const _isGreetedNow  = greetingComplete;  // 挨拶ターン自体ではなく、その完了後に true になる
       if (isGreeted && !greetingComplete) {
         greetingComplete = true;  // 挨拶ターン完了をマーク
@@ -2384,11 +2398,6 @@ async function handleServerMsg(msg) {
           greetingRetryTimer = null;
           console.info('[greeting] リトライタイマーキャンセル（挨拶完了）');
         }
-      }
-      // ツール呼び出し分のリンクはすぐ表示
-      if (pendingLinks.length > 0) {
-        pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
-        pendingLinks = [];
       }
       // ユーザー発言の誤変換補正（非同期・表示のみ更新）
       if (pendingUserBubble) {
