@@ -1519,23 +1519,38 @@ async function fetchWeather(location, date = 'today') {
   const todayRain    = maxPop(todayStr);
   const tomorrowRain = maxPop(tomorrowStr);
 
-  // --- 気温（timeSeries[2]: 00:00=最低, 09:00=最高）---
+  // --- 気温（jmaData 全要素の全 timeSeries からロバストに取得）---
   let todayTmax = '--', todayTmin = '--', tomorrowTmax = '--', tomorrowTmin = '--';
-  if (ts[2]) {
-    const tempArea = ts[2].areas[0];
-    const tempDefs = ts[2].timeDefines;
-    tempDefs.forEach((t, i) => {
-      const val = tempArea.temps?.[i];
-      if (val === undefined || val === null || val === '') return;
-      const dayStr = t.slice(0, 10);
-      const hour   = parseInt(t.slice(11, 13));
-      if (dayStr === todayStr) {
-        if (hour >= 6) todayTmax = val; else todayTmin = val;
-      } else if (dayStr === tomorrowStr) {
-        if (hour >= 6) tomorrowTmax = val; else tomorrowTmin = val;
-      }
-    });
+  const extractTemps = (series) => {
+    if (!series || todayTmax !== '--' && todayTmin !== '--' && tomorrowTmax !== '--' && tomorrowTmin !== '--') return;
+    const defs = series.timeDefines;
+    for (let aIdx = 0; aIdx < (series.areas?.length || 0); aIdx++) {
+      const area = series.areas[aIdx];
+      const temps = area.temps;
+      if (!temps) continue;
+      defs.forEach((t, i) => {
+        const val = temps[i];
+        if (val === undefined || val === null || val === '') return;
+        const dayStr = t.slice(0, 10);
+        const hour   = parseInt(t.slice(11, 13));
+        if (dayStr === todayStr) {
+          if (hour >= 6) { if (todayTmax === '--') todayTmax = val; }
+          else           { if (todayTmin === '--') todayTmin = val; }
+        } else if (dayStr === tomorrowStr) {
+          if (hour >= 6) { if (tomorrowTmax === '--') tomorrowTmax = val; }
+          else           { if (tomorrowTmin === '--') tomorrowTmin = val; }
+        }
+      });
+      if (todayTmax !== '--' || tomorrowTmax !== '--') break; // 取得できたら次エリア不要
+    }
+  };
+  // jmaData[0] の全 timeSeries を試す
+  for (const series of (jmaData[0].timeSeries || [])) extractTemps(series);
+  // まだ取れていなければ jmaData[1] も試す
+  if (jmaData[1]) {
+    for (const series of (jmaData[1].timeSeries || [])) extractTemps(series);
   }
+  console.info('[weather] temps today:', todayTmax, todayTmin, ' / tomorrow:', tomorrowTmax, tomorrowTmin);
 
   // --- 結果組み立て ---
   const cond = date === 'tomorrow' ? tomorrowWx : todayWx;
@@ -1557,7 +1572,8 @@ async function fetchWeather(location, date = 'today') {
   // 気象庁データは都道府県レベルなので、都道府県名で案内する
   const areaName = areaName_pre;
   // ツールテキストは「都道府県名で」という形に固定し、Geminiの言い換えを防ぐ
-  const text = `【天気案内指示】必ず「${areaName}」と都道府県名で案内すること。「${areaName}」以外の地名（石狩振興局・石狩地方・振興局・地方など細分地域名）は絶対に使わないこと。` +
+  const tempInstruction = (tmax !== '--' || tmin !== '--') ? '最高気温・最低気温を必ず返答に含めること。' : '（気温データなし）';
+  const text = `【天気案内指示】必ず「${areaName}」と都道府県名で案内すること。「${areaName}」以外の地名（石狩振興局・石狩地方・振興局・地方など細分地域名）は絶対に使わないこと。${tempInstruction}` +
     `\n${areaName}の${dateLabel}: ${cond}${tempStr}${rainStr}（気象庁データ）`;
 
   // 気象庁公式予報ページへの直接リンク
