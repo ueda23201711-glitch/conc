@@ -494,6 +494,17 @@ const PLACE_READINGS = {
   '老舗': 'しにせ',
   '3つ': 'みっつ',
   '★': 'ほし',
+  '時々': 'ときどき',
+  '所により': 'ところにより',
+  '所々': 'ところどころ',
+  '所によっては': 'ところによっては',
+  '霙': 'みぞれ',
+  '霰': 'あられ',
+  '氷雨': 'ひさめ',
+  '吹雪': 'ふぶき',
+  '地吹雪': 'じふぶき',
+  '雷雨': 'らいう',
+  '雷': 'かみなり',
   '城跡': 'しろあと',
   '風情': 'ふぜい',
   '夜景': 'やけい',
@@ -1386,24 +1397,40 @@ async function fetchWeather(location, date = 'today') {
 
   const best = nomData[0];
   const displayName = best.display_name?.split(',')[0]?.trim() || location;
-  const prefecture = best.address?.state || best.address?.county || '';
+  const lat = parseFloat(best.lat);
+  const lon = parseFloat(best.lon);
 
-  // ② 都道府県 → 気象庁エリアコード
+  // ② リバースジオコーディングで都道府県を確実に取得（zoom=6=都道府県レベル）
+  let prefecture = '';
+  try {
+    const revUrl = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=ja&zoom=6&addressdetails=1`;
+    const revResp = await fetchWithTimeout(revUrl, { headers: { 'Accept-Language': 'ja', 'Accept': 'application/json' } });
+    const revData = await revResp.json();
+    prefecture = revData?.address?.state || revData?.address?.county || revData?.name || '';
+    console.info('[weather] prefecture from reverse geocode:', prefecture);
+  } catch(e) {
+    console.warn('[weather] reverse geocode failed:', e.message);
+    // フォールバック: forward search の address から取得
+    prefecture = best.address?.state || best.address?.county || '';
+  }
+
+  // ③ 都道府県名 → 気象庁エリアコード
   let areaCode = null;
-  // (a) Nominatim address.state が "宮城県" 等で来る場合
   if (prefecture) {
     for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
-      if (prefecture.includes(key)) { areaCode = code; break; }
+      if (prefecture.includes(key) || key.includes(prefecture.replace(/[都道府県道]$/, ''))) {
+        areaCode = code; break;
+      }
     }
   }
-  // (b) display_name から都道府県を探す（"仙台市, 宮城県, 日本" のように含まれる）
+  // フォールバック: display_name 全文に都道府県名が含まれるか
   if (!areaCode) {
     const displayFull = best.display_name || '';
     for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
       if (displayFull.includes(key)) { areaCode = code; break; }
     }
   }
-  // (c) 入力地名から直接マッチ（"宮城県仙台市" 等）
+  // フォールバック: 入力地名から都道府県を推定
   if (!areaCode) {
     for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
       const bare = key.replace(/[都道府県]$/, '');
@@ -1475,13 +1502,13 @@ async function fetchWeather(location, date = 'today') {
   const tmax = date === 'tomorrow' ? tomorrowTmax : todayTmax;
   const tmin = date === 'tomorrow' ? tomorrowTmin : todayTmin;
   const rain = date === 'tomorrow' ? tomorrowRain : todayRain;
-  // 実際の月日をラベルに含める（Geminiが正しい日付で発音できるようにする）
+  // 実際の月日をラベルに含める（Geminiが正しい日付を言えるよう、月日を先頭に置く）
   const targetDate = date === 'tomorrow'
     ? new Date(jstNow.getTime() + 86400000)
     : jstNow;
   const mm = targetDate.getUTCMonth() + 1;
   const dd = targetDate.getUTCDate();
-  const dateLabel = date === 'tomorrow' ? `明日（${mm}月${dd}日）の天気予報` : `今日（${mm}月${dd}日）の天気予報`;
+  const dateLabel = date === 'tomorrow' ? `${mm}月${dd}日（明日）の天気予報` : `${mm}月${dd}日（今日）の天気予報`;
 
   const tempStr = (tmax !== '--' || tmin !== '--')
     ? `、最高${tmax !== '--' ? tmax + '°C' : '−'}／最低${tmin !== '--' ? tmin + '°C' : '−'}`
