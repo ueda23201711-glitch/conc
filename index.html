@@ -1390,17 +1390,24 @@ async function fetchWeather(location, date = 'today') {
 
   // ② 都道府県 → 気象庁エリアコード
   let areaCode = null;
-  // Nominatim が返す state（"宮城県" 等）で直接マッチ
-  for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
-    if (prefecture.includes(key) || key.includes(prefecture.replace(/[都道府県]/, ''))) {
-      areaCode = code; break;
+  // (a) Nominatim address.state が "宮城県" 等で来る場合
+  if (prefecture) {
+    for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
+      if (prefecture.includes(key)) { areaCode = code; break; }
     }
   }
-  // 入力地名からもフォールバック検索
+  // (b) display_name から都道府県を探す（"仙台市, 宮城県, 日本" のように含まれる）
+  if (!areaCode) {
+    const displayFull = best.display_name || '';
+    for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
+      if (displayFull.includes(key)) { areaCode = code; break; }
+    }
+  }
+  // (c) 入力地名から直接マッチ（"宮城県仙台市" 等）
   if (!areaCode) {
     for (const [key, code] of Object.entries(JMA_AREA_CODE)) {
       const bare = key.replace(/[都道府県]$/, '');
-      if (location.includes(bare) || location.includes(key)) {
+      if (bare && (location.includes(bare) || location.includes(key))) {
         areaCode = code; break;
       }
     }
@@ -1468,7 +1475,13 @@ async function fetchWeather(location, date = 'today') {
   const tmax = date === 'tomorrow' ? tomorrowTmax : todayTmax;
   const tmin = date === 'tomorrow' ? tomorrowTmin : todayTmin;
   const rain = date === 'tomorrow' ? tomorrowRain : todayRain;
-  const dateLabel = date === 'tomorrow' ? '明日の天気予報' : '今日の天気予報';
+  // 実際の月日をラベルに含める（Geminiが正しい日付で発音できるようにする）
+  const targetDate = date === 'tomorrow'
+    ? new Date(jstNow.getTime() + 86400000)
+    : jstNow;
+  const mm = targetDate.getUTCMonth() + 1;
+  const dd = targetDate.getUTCDate();
+  const dateLabel = date === 'tomorrow' ? `明日（${mm}月${dd}日）の天気予報` : `今日（${mm}月${dd}日）の天気予報`;
 
   const tempStr = (tmax !== '--' || tmin !== '--')
     ? `、最高${tmax !== '--' ? tmax + '°C' : '−'}／最低${tmin !== '--' ? tmin + '°C' : '−'}`
