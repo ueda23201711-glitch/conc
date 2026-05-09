@@ -1521,16 +1521,23 @@ async function fetchWeather(location, date = 'today') {
 
   // --- 気温（jmaData 全要素の全 timeSeries からロバストに取得）---
   let todayTmax = '--', todayTmin = '--', tomorrowTmax = '--', tomorrowTmin = '--';
+
   const extractTemps = (series) => {
-    if (!series || todayTmax !== '--' && todayTmin !== '--' && tomorrowTmax !== '--' && tomorrowTmin !== '--') return;
+    if (!series) return;
     const defs = series.timeDefines;
+    if (!defs) return;
+    // この series が temps データを持つか確認
+    const hasTomorrow = defs.some(t => t.slice(0, 10) === tomorrowStr);
+    const hasTemps    = series.areas?.some(a => a.temps?.length > 0);
+    if (!hasTemps) return;
+    console.info('[weather] temp series timeDefines:', defs.slice(0, 6), 'hasTomorrow:', hasTomorrow);
     for (let aIdx = 0; aIdx < (series.areas?.length || 0); aIdx++) {
-      const area = series.areas[aIdx];
+      const area  = series.areas[aIdx];
       const temps = area.temps;
-      if (!temps) continue;
+      if (!Array.isArray(temps)) continue;
       defs.forEach((t, i) => {
-        const val = temps[i];
-        if (val === undefined || val === null || val === '') return;
+        const val = String(temps[i] ?? '').trim();
+        if (!val || val === 'null') return;
         const dayStr = t.slice(0, 10);
         const hour   = parseInt(t.slice(11, 13));
         if (dayStr === todayStr) {
@@ -1541,16 +1548,18 @@ async function fetchWeather(location, date = 'today') {
           else           { if (tomorrowTmin === '--') tomorrowTmin = val; }
         }
       });
-      if (todayTmax !== '--' || tomorrowTmax !== '--') break; // 取得できたら次エリア不要
     }
   };
-  // jmaData[0] の全 timeSeries を試す
-  for (const series of (jmaData[0].timeSeries || [])) extractTemps(series);
-  // まだ取れていなければ jmaData[1] も試す
-  if (jmaData[1]) {
-    for (const series of (jmaData[1].timeSeries || [])) extractTemps(series);
+
+  // jmaData の全要素（[0],[1],[2]…）の全 timeSeries を探索
+  for (let di = 0; di < jmaData.length; di++) {
+    for (const series of (jmaData[di]?.timeSeries || [])) {
+      if (tomorrowTmax !== '--' && tomorrowTmin !== '--') break; // 取得済みなら終了
+      extractTemps(series);
+    }
+    if (tomorrowTmax !== '--' && tomorrowTmin !== '--') break;
   }
-  console.info('[weather] temps today:', todayTmax, todayTmin, ' / tomorrow:', tomorrowTmax, tomorrowTmin);
+  console.info('[weather] temps today:', todayTmax, todayTmin, '/ tomorrow:', tomorrowTmax, tomorrowTmin);
 
   // --- 結果組み立て ---
   const cond = date === 'tomorrow' ? tomorrowWx : todayWx;
