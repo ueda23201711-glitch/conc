@@ -2185,12 +2185,10 @@ async function handleServerMsg(msg) {
         isGreeted = true;
         const sendGreeting = () => {
           if (ws && ws.readyState === WebSocket.OPEN) {
-            // 挨拶トリガー: turnComplete シグナルで Gemini に最初の発話を促す
+            // Gemini 3.1: realtimeInput に短いテキストを送って挨拶を促す
+            // （空文字・clientContent はどちらも 3.1 では無視される）
             ws.send(JSON.stringify({
-              clientContent: {
-                turns: [{ role: 'user', parts: [{ text: '' }] }],
-                turnComplete: true
-              }
+              realtimeInput: { text: '。' }
             }));
           }
         };
