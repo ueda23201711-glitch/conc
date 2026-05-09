@@ -2339,11 +2339,6 @@ async function handleServerMsg(msg) {
         if (b.dataset.state === 'empty' || b.dataset.state === 'indicator') {
           b.textContent = t;
           b.dataset.state = 'text';
-          // Places API個別リンクがあれば、テキスト表示開始と同時に表示（吹き出しの下に出す）
-          if (placesApiLinksAdded && pendingLinks.length > 0) {
-            pendingLinks.forEach(link => appendBubbleWithLinks([link], 'system'));
-            pendingLinks = [];
-          }
         } else {
           // 追加転写 or 直前バブルへの追記
           b.textContent += t;
@@ -2374,62 +2369,108 @@ async function handleServerMsg(msg) {
       }
     }
 
-    // 生成完了 → 【】タグ除去＋ストリーミングで未検出のスポットを補完
+    // 生成完了 → 200ms待って転写を確定させてからリンクを【スポット名】順に表示
     if (sc.generationComplete) {
-      const _gcBubbles = chatEl.querySelectorAll('.row.assistant .bubble');
-      const _gcText = _gcBubbles.length > 0
-        ? _gcBubbles[_gcBubbles.length - 1].textContent : '';
-      console.info('[generationComplete] bubble chars:', _gcText.length, 'streamingSpots:', streamingSpotLinks.size, 'pendingLinks:', pendingLinks.length);
-
-      // ストリーミング検出で漏れたスポット（例: 転写とgenerationCompleteが同時到着）を補完
-      if (!placesApiLinksAdded && _gcText.includes('】')) {
-        [..._gcText.matchAll(/【([^】]{2,20})】/g)].forEach(m => {
-          const name = m[1];
-          if (!streamingSpotLinks.has(name)) {
-            streamingSpotLinks.add(name);
-            appendBubbleWithLinks([{
-              text: `📍 ${name} をGoogle マップで見る`,
-              url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}`,
-              embedUrl: null
-            }], 'system');
-          }
-        });
-      }
-      // AIバブルから【】タグ・ふりがなを除去
-      if (_gcBubbles.length > 0) {
+      // 残りの outputTranscription が届くのを少し待つ
+      setTimeout(() => {
+        const _gcBubbles = chatEl.querySelectorAll('.row.assistant .bubble');
+        if (_gcBubbles.length === 0) return; // 吹き出しがまだない場合は turnComplete に任せる
         const _gcB = _gcBubbles[_gcBubbles.length - 1];
-        _gcB.textContent = _gcB.textContent.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
-      }
-      // pendingLinks はここでは表示しない
-      // → Places API リンクは outputTranscription 最初のチャンクで表示
-      // → それ以外は turnComplete の安全網で表示
+        const _gcText = _gcB.textContent;
+        if (!_gcText || _gcText.trim().length < 5) return; // テキストがなければスキップ
+
+        // 【スポット名】の登場順を取得
+        const _gcSpotNames = [..._gcText.matchAll(/【([^】]{2,20})】/g)].map(m => m[1]);
+
+        if (_gcSpotNames.length > 0 || pendingLinks.length > 0) {
+          // Places API リンクと【スポット名】を照合して登場順に並べ替え
+          const _usedLinkIdx = new Set();
+          const _orderedLinks = [];
+
+          _gcSpotNames.forEach(spotName => {
+            // pendingLinks から最も名前が近いリンクを探す
+            let bestIdx = -1;
+            let bestScore = 0;
+            pendingLinks.forEach((lnk, i) => {
+              if (_usedLinkIdx.has(i) || !lnk.text.startsWith('📍')) return;
+              const lnkName = lnk.text.replace(/^📍\s*/, '').replace(/\s*をGoogle マップで見る$/, '');
+              // 部分一致スコア
+              const score = lnkName.includes(spotName) || spotName.includes(lnkName) ? 2
+                          : [...spotName].filter(c => lnkName.includes(c)).length;
+              if (score > bestScore) { bestScore = score; bestIdx = i; }
+            });
+
+            if (bestIdx !== -1 && bestScore > 0) {
+              _usedLinkIdx.add(bestIdx);
+              _orderedLinks.push(pendingLinks[bestIdx]);
+            } else {
+              // Places API に対応リンクがない → 汎用 Google マップ検索リンクを生成
+              _orderedLinks.push({
+                text: `📍 ${spotName} をGoogle マップで見る`,
+                url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spotName)}`,
+                embedUrl: null
+              });
+            }
+          });
+
+          // 未使用の非スポットリンク（ルート・検索等）を末尾に追加
+          pendingLinks.forEach((lnk, i) => {
+            if (!_usedLinkIdx.has(i) && !lnk.text.startsWith('📍')) _orderedLinks.push(lnk);
+          });
+
+          // 【】タグ・ふりがなを除去してからリンクを表示
+          _gcB.textContent = _gcText.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
+          _orderedLinks.forEach(lnk => appendBubbleWithLinks([lnk], 'system'));
+          pendingLinks = [];
+          placesApiLinksAdded = true; // turnComplete での重複表示を防ぐ
+          streamingSpotLinks = new Set(_gcSpotNames); // 重複防止
+        } else {
+          // スポットも pendingLinks もない場合は【】除去だけ
+          _gcB.textContent = _gcText.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
+        }
+      }, 200);
     }
 
     // ターン完了
     if (sc.turnComplete) {
       finishAiBubble();
 
-      // 安全網: generationComplete・ストリーミング検出でも漏れたスポットをここで補完
+      // 安全網: generationComplete の setTimeout が間に合わなかった場合の補完
       const _lastAiBubbleForLinks = chatEl.querySelectorAll('.row.assistant .bubble');
-      const _aiBubbleText = _lastAiBubbleForLinks.length > 0
-        ? _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1].textContent : '';
+      const _tcB = _lastAiBubbleForLinks.length > 0
+        ? _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1] : null;
+      const _aiBubbleText = _tcB ? _tcB.textContent : '';
       if (!placesApiLinksAdded && _aiBubbleText.includes('】')) {
-        [..._aiBubbleText.matchAll(/【([^】]{2,20})】/g)].forEach(m => {
-          const name = m[1];
-          if (!streamingSpotLinks.has(name)) {
-            streamingSpotLinks.add(name);
+        // 【スポット名】順に表示
+        const _tcSpotNames = [..._aiBubbleText.matchAll(/【([^】]{2,20})】/g)].map(m => m[1]);
+        const _tcUsed = new Set();
+        _tcSpotNames.forEach(spotName => {
+          if (streamingSpotLinks.has(spotName)) return;
+          let bestIdx = -1, bestScore = 0;
+          pendingLinks.forEach((lnk, i) => {
+            if (_tcUsed.has(i) || !lnk.text.startsWith('📍')) return;
+            const lnkName = lnk.text.replace(/^📍\s*/, '').replace(/\s*をGoogle マップで見る$/, '');
+            const score = lnkName.includes(spotName) || spotName.includes(lnkName) ? 2
+                        : [...spotName].filter(c => lnkName.includes(c)).length;
+            if (score > bestScore) { bestScore = score; bestIdx = i; }
+          });
+          if (bestIdx !== -1 && bestScore > 0) {
+            _tcUsed.add(bestIdx);
+            appendBubbleWithLinks([pendingLinks[bestIdx]], 'system');
+          } else {
             appendBubbleWithLinks([{
-              text: `📍 ${name} をGoogle マップで見る`,
-              url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}`,
+              text: `📍 ${spotName} をGoogle マップで見る`,
+              url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spotName)}`,
               embedUrl: null
             }], 'system');
           }
+          streamingSpotLinks.add(spotName);
         });
+        pendingLinks = pendingLinks.filter((_, i) => !_tcUsed.has(i));
       }
       // 【】タグ・ふりがな除去（常に実行）
-      if (_lastAiBubbleForLinks.length > 0) {
-        const _b = _lastAiBubbleForLinks[_lastAiBubbleForLinks.length - 1];
-        _b.textContent = _b.textContent.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
+      if (_tcB) {
+        _tcB.textContent = _aiBubbleText.replace(/【([^】]+)】/g, '$1').replace(/（[ぁ-ん]+）/g, '');
       }
       // 残った pendingLinks を表示（通常は転写開始時点で表示済みなので空のはず）
       if (pendingLinks.length > 0) {
