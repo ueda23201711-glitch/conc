@@ -194,7 +194,7 @@ const SYSTEM_INSTRUCTION =
   'ユーザーが「石巻」「仙台」などの市区町村名で質問しても、回答では「宮城県の天気は…」のように都道府県名で答えること。市区町村名で天気を案内することは禁止。' +
   '・日付・時刻・曜日→ get_current_datetime を必ず呼び出す。' +
   '・電車・路線の運行状況・遅延・運休→ get_train_status を呼び出す。・次の電車・時刻表→ get_next_trains を呼び出す。目的地がわかっている場合は to_station にも設定すること。「○○から△△への次の電車は？」という質問では station=○○、to_station=△△ を設定すること。' +
-  '・〇〇駅から●●駅への行き方・「〇〇から●●まで行きたい」「〇〇から●●への行き方」「〇〇から●●に行くには」など、出発地と目的地が明示された移動・ルート案内・乗り換え質問→ 必ず get_route を呼び出すこと。search_web は使わないこと。from_station には出発地（例:「東京」「新宿」）、to_station には目的地（例:「仙台」「横浜」）をそのままセットすること（「駅」は付けなくてよい）。出発時刻が指定された場合は departure_time="HH:MM" を設定し、明日なら departure_date="tomorrow" も設定すること。' +
+  '・〇〇駅から●●駅への行き方・「〇〇から●●まで行きたい」「〇〇から●●への行き方」「〇〇から●●に行くには」など、出発地と目的地が明示された移動・ルート案内・乗り換え質問→ 必ず get_route を呼び出すこと。search_web は使わないこと。from_station には出発地（例:「東京」「新宿」）、to_station には目的地（例:「仙台」「横浜」）をそのままセットすること（「駅」は付けなくてよい）。出発時刻が指定された場合は departure_time="HH:MM" を設定し、明日なら departure_date="tomorrow" も設定すること。「ここから」「現在地から」など出発地が現在地の場合は use_current_location=true を設定し、from_station は省略すること。' +
   '・レストラン・お店・カフェ・観光スポット・施設・おすすめを聞かれたら→ get_places を必ず呼び出す。' +
   '・お祭り・イベント・ニュース・最新情報・現在の営業状況・今年の日程など、時事性のある最新情報が必要な質問→ search_web を呼び出す。ただし天気・天気予報は時事性があっても search_web ではなく必ず get_current_weather を使うこと。歴史・文化・人物・地理・言語・科学など自分が知っている一般知識・歴史的事実はツールを使わず直接答えること（例：築城時期・創業年・歴史的出来事など）。' +
   '【回答ルール】' +
@@ -2124,17 +2124,21 @@ function connect(apiKey) {
             }
           }, {
             name: 'get_route',
-            description: '出発駅から目的駅への路線・乗り換え案内を取得します。「〇〇から●●まで行きたい」「乗り換えを教えて」「〇〇駅から●●駅の行き方」など移動ルートに関する質問では必ずこのツールを呼び出してください。出発時刻・日付が指定された場合は departure_time と departure_date も必ず設定してください。',
+            description: '出発地から目的地への移動ルート・乗り換え案内を取得します。「〇〇から●●まで行きたい」「乗り換えを教えて」「〇〇駅から●●駅の行き方」など移動ルートに関する質問では必ずこのツールを呼び出してください。「ここから」「現在地から」など出発地が現在地の場合は use_current_location=true にしてください。出発時刻・日付が指定された場合は departure_time と departure_date も必ず設定してください。',
             parameters: {
               type: 'OBJECT',
               properties: {
                 from_station: {
                   type: 'STRING',
-                  description: '出発駅名（例: 新宿、東京、渋谷）'
+                  description: '出発駅名（例: 新宿、東京、渋谷）。use_current_location=true の場合は省略可。'
                 },
                 to_station: {
                   type: 'STRING',
-                  description: '目的駅名（例: 池袋、横浜、品川）'
+                  description: '目的地・目的駅名（例: 池袋、横浜、東京タワー）'
+                },
+                use_current_location: {
+                  type: 'BOOLEAN',
+                  description: '「ここから」「現在地から」など出発地が現在地の場合は true にする。'
                 },
                 departure_time: {
                   type: 'STRING',
@@ -2146,7 +2150,7 @@ function connect(apiKey) {
                   enum: ['today', 'tomorrow']
                 }
               },
-              required: ['from_station', 'to_station']
+              required: ['to_station']
             }
           }, {
             name: 'search_web',
@@ -2571,14 +2575,36 @@ async function handleServerMsg(msg) {
         } else if (call.name === 'get_route') {
           const rFrom = call.args?.from_station || '';
           const rTo   = call.args?.to_station   || '';
-          appendBubble(`🗺 ルート検索中…（${rFrom} → ${rTo}）`, 'system');
-          // 既に「駅」で終わっている場合は重複しない
-          const rFromQ = rFrom.endsWith('駅') ? rFrom : rFrom + '駅';
-          const rToQ   = rTo.endsWith('駅')   ? rTo   : rTo   + '駅';
-          const gmFallbackUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(rFromQ)}&destination=${encodeURIComponent(rToQ)}&travelmode=transit&hl=ja`;
-          pendingLinks.push({ text: `🗺 Google マップで乗換案内を見る（${rFrom}→${rTo}）`, url: gmFallbackUrl, embedUrl: null });
-          output = `${rFrom}から${rTo}のルートをGoogleマップでご案内します。リンクからご確認ください。`;
-          console.info('[route] google maps only mode:', output);
+          const useCurrentLoc = call.args?.use_current_location === true;
+          const rToQ  = rTo.endsWith('駅') ? rTo : rTo + '駅';
+
+          if (useCurrentLoc) {
+            appendBubble(`🗺 現在地から${rTo}へのルートを取得中…`, 'system');
+            try {
+              const pos = await new Promise((resolve, reject) =>
+                navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000, enableHighAccuracy: true })
+              );
+              const lat = pos.coords.latitude;
+              const lng = pos.coords.longitude;
+              const gmUrl = `https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${encodeURIComponent(rToQ)}&travelmode=transit&hl=ja`;
+              pendingLinks.push({ text: `🗺 Google マップで現在地から${rTo}へのルートを見る`, url: gmUrl, embedUrl: null });
+              output = `現在地から${rTo}へのルートをGoogleマップでご案内します。リンクからご確認ください。`;
+              console.info('[route] current location:', lat, lng, '→', rTo);
+            } catch (e) {
+              console.warn('[route] geolocation error:', e);
+              // 位置情報取得失敗 → originなしで目的地だけ指定（Google Mapsが現在地を自動使用）
+              const gmUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(rToQ)}&travelmode=transit&hl=ja`;
+              pendingLinks.push({ text: `🗺 Google マップで${rTo}へのルートを見る`, url: gmUrl, embedUrl: null });
+              output = `位置情報の取得ができませんでした。Googleマップでルートをご確認ください。`;
+            }
+          } else {
+            appendBubble(`🗺 ルート検索中…（${rFrom} → ${rTo}）`, 'system');
+            const rFromQ = rFrom.endsWith('駅') ? rFrom : rFrom + '駅';
+            const gmFallbackUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(rFromQ)}&destination=${encodeURIComponent(rToQ)}&travelmode=transit&hl=ja`;
+            pendingLinks.push({ text: `🗺 Google マップで乗換案内を見る（${rFrom}→${rTo}）`, url: gmFallbackUrl, embedUrl: null });
+            output = `${rFrom}から${rTo}のルートをGoogleマップでご案内します。リンクからご確認ください。`;
+            console.info('[route] station to station:', rFrom, '→', rTo);
+          }
         } else if (call.name === 'search_web') {
           const q = call.args?.query || '';
           appendBubble(`🔎 「${q}」を検索中…`, 'system');
