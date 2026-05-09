@@ -1365,58 +1365,6 @@ function wxEmoji(cond) {
   return '🌡';
 }
 
-// 天気カード用 Blob URL を生成
-function buildWeatherBlobUrl(card) {
-  const emoji = wxEmoji(card.cond);
-  const dateLabel = card.date === 'tomorrow' ? '明日の天気予報' : '今日の天気予報';
-  const windRow = (card.wind && card.wind !== '--' && card.wind !== '−')
-    ? `<div class="row-item"><span class="lbl">最大風速</span><span class="val">${card.wind} m/s</span></div>`
-    : '';
-  const tempRow = `
-    <div class="row-item"><span class="lbl">最高気温</span><span class="val">${card.tmax !== '--' ? card.tmax + '°C' : '−'}</span></div>
-    <div class="row-item"><span class="lbl">最低気温</span><span class="val">${card.tmin !== '--' ? card.tmin + '°C' : '−'}</span></div>
-    <div class="row-item"><span class="lbl">降水確率</span><span class="val">${card.rain !== '--' ? card.rain + '%' : '−'}</span></div>
-    ${windRow}`;
-  const html = `<!DOCTYPE html>
-<html lang="ja"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>${card.name} ${dateLabel}</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;display:flex;flex-direction:column;min-height:100vh;background:#e8f5e9}
-  .hdr{background:#2e7d32;color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.2);min-height:52px}
-  .back{background:#fff;color:#2e7d32;border:none;padding:9px 18px;border-radius:9px;font-weight:700;font-size:15px;cursor:pointer}
-  .ttl{flex:1;font-size:14px;font-weight:600}
-  .card{margin:28px auto;background:#fff;border-radius:20px;padding:32px 28px;max-width:380px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,.10);text-align:center}
-  .place{font-size:20px;font-weight:700;color:#1b5e20;margin-bottom:4px}
-  .date-lbl{font-size:13px;color:#666;margin-bottom:20px}
-  .emoji{font-size:72px;line-height:1;margin:12px 0}
-  .cond{font-size:22px;font-weight:700;color:#333;margin-bottom:24px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px}
-  .row-item{background:#f1f8e9;border-radius:12px;padding:14px 10px}
-  .lbl{display:block;font-size:12px;color:#666;margin-bottom:4px}
-  .val{display:block;font-size:20px;font-weight:700;color:#2e7d32}
-  .src{font-size:11px;color:#aaa;margin-top:22px}
-</style></head>
-<body>
-  <div class="hdr">
-    <button class="back" onclick="if(opener&&!opener.closed){opener.focus();}window.close()">← 会話に戻る</button>
-    <span class="ttl">${card.name} ${dateLabel}</span>
-  </div>
-  <div class="card">
-    <div class="place">${card.name}</div>
-    <div class="date-lbl">${dateLabel}</div>
-    <div class="emoji">${emoji}</div>
-    <div class="cond">${card.cond}</div>
-    <div class="grid">${tempRow}</div>
-    <div class="src">データ: 気象庁 / OpenStreetMap</div>
-  </div>
-</body></html>`;
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  setTimeout(() => URL.revokeObjectURL(url), 300000);
-  return url;
-}
 
 async function fetchWeather(location, date = 'today') {
   const fetchWithTimeout = (url, opts = {}, ms = 8000) => {
@@ -1528,8 +1476,9 @@ async function fetchWeather(location, date = 'today') {
   const rainStr = rain !== '--' ? `、降水確率${rain}%` : '';
   const text = `${displayName}の${dateLabel}: ${cond}${tempStr}${rainStr}（気象庁データ）`;
 
-  const blobUrl = buildWeatherBlobUrl({ name: displayName, date, cond, tmax, tmin, rain, wind: '--' });
-  return { text, blobUrl };
+  // 気象庁公式予報ページへの直接リンク
+  const jmaPageUrl = `https://www.jma.go.jp/bosai/forecast/#area_type=offices&area_code=${areaCode}`;
+  return { text, blobUrl: jmaPageUrl };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2379,7 +2328,7 @@ async function handleServerMsg(msg) {
           // ターン完了後に天気カードリンクをキューに積む（気象庁データ）
           if (wxResult.blobUrl && output && !output.includes('失敗') && !output.includes('見つかりません')) {
             const isTomorrow = (call.args?.date === 'tomorrow');
-            const weatherLabel = isTomorrow ? '🌤 明日の天気詳細を見る' : '🌤 今日の天気詳細を見る';
+            const weatherLabel = isTomorrow ? '🌤 気象庁で明日の天気予報を見る' : '🌤 気象庁で今日の天気予報を見る';
             pendingLinks.push({
               text: weatherLabel,
               url: wxResult.blobUrl,
