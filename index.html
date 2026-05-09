@@ -190,6 +190,7 @@ const SYSTEM_INSTRUCTION =
   '・天気・気象→ get_current_weather を必ず呼び出す。' +
   '天気を案内する際は、ツールが返した都道府県名（例:「宮城県」「愛知県」）を必ず使うこと。' +
   'ユーザーが「石巻」「仙台」などの市区町村名で質問しても、回答では「宮城県の天気は…」のように都道府県名で答えること。市区町村名で天気を案内することは禁止。' +
+  '明後日・3日後・今週末・週間天気など明日より先の天気を聞かれた場合も get_current_weather を必ず呼び出しdate="weekly"を設定すること。自分で「調べられない」と答えてはいけない。' +
   '・日付・時刻・曜日→ get_current_datetime を必ず呼び出す。' +
   '・電車・路線の運行状況・遅延・運休→ get_train_status を呼び出す。・次の電車・時刻表→ get_next_trains を呼び出す。目的地がわかっている場合は to_station にも設定すること。「○○から△△への次の電車は？」という質問では station=○○、to_station=△△ を設定すること。' +
   '・〇〇駅から●●駅への行き方・ルート案内・乗り換え→ get_route を必ず呼び出す。出発時刻が指定された場合は departure_time="HH:MM" を設定し、明日なら departure_date="tomorrow" も設定すること。' +
@@ -1450,6 +1451,17 @@ async function fetchWeather(location, date = 'today') {
     return { text: `「${location}」の都道府県を特定できませんでした（例: 仙台市、青森市、東京など都市名で入力してください）`, blobUrl: null };
   }
 
+  // エリア表示名（都道府県名優先）
+  const areaName_pre = prefecture || displayName;
+
+  // 週間天気（明後日以降）は気象庁の週間予報ページへ誘導
+  if (date === 'weekly') {
+    const jmaWeeklyUrl = `https://www.jma.go.jp/bosai/forecast/#area_type=offices&area_code=${areaCode}`;
+    const text = `【天気案内指示】必ず「${areaName_pre}」と都道府県名で案内すること。市区町村名は使わないこと。` +
+      `\n${areaName_pre}の週間天気予報（明後日以降）は気象庁のサイトでご確認いただけます。気象庁の週間天気予報ページのリンクを案内してください。（気象庁データ）`;
+    return { text, blobUrl: jmaWeeklyUrl };
+  }
+
   // ③ 気象庁 JSON API（無料・APIキー不要）
   const jmaUrl = `https://www.jma.go.jp/bosai/forecast/data/forecast/${areaCode}.json`;
   let jmaData;
@@ -1522,7 +1534,7 @@ async function fetchWeather(location, date = 'today') {
     : '';
   const rainStr = rain !== '--' ? `、降水確率${rain}%` : '';
   // 気象庁データは都道府県レベルなので、都道府県名で案内する
-  const areaName = prefecture || displayName;
+  const areaName = areaName_pre;
   // ツールテキストは「都道府県名で」という形に固定し、Geminiの言い換えを防ぐ
   const text = `【天気案内指示】必ず「${areaName}」と都道府県名で案内すること。市区町村名は使わないこと。` +
     `\n${areaName}の${dateLabel}: ${cond}${tempStr}${rainStr}（気象庁データ）`;
@@ -1977,7 +1989,7 @@ function connect(apiKey) {
         tools: [{
           functionDeclarations: [{
             name: 'get_current_weather',
-            description: '指定した都市の天気情報を取得します。「今日の天気」「明日の天気」「天気は？」など天気に関する質問では必ずこのツールを呼び出してください。',
+            description: '指定した都市の天気情報を取得します。「今日の天気」「明日の天気」「明後日の天気」「週間天気」「天気は？」など天気に関する質問では必ずこのツールを呼び出してください。明後日以降・週間天気の質問ではdate="weekly"を使うこと。',
             parameters: {
               type: 'OBJECT',
               properties: {
@@ -1987,8 +1999,8 @@ function connect(apiKey) {
                 },
                 date: {
                   type: 'STRING',
-                  description: '取得する日付。"today"（今日）または "tomorrow"（明日）。省略時は今日。',
-                  enum: ['today', 'tomorrow']
+                  description: '取得する日付。"today"（今日）、"tomorrow"（明日）、"weekly"（明後日以降・週間天気）。明後日・3日後・今週・週間天気などは"weekly"を使うこと。省略時は今日。',
+                  enum: ['today', 'tomorrow', 'weekly']
                 }
               },
               required: ['location']
@@ -2384,7 +2396,9 @@ async function handleServerMsg(msg) {
           // ターン完了後に天気カードリンクをキューに積む（気象庁データ）
           if (wxResult.blobUrl && output && !output.includes('失敗') && !output.includes('見つかりません')) {
             const isTomorrow = (call.args?.date === 'tomorrow');
-            const weatherLabel = isTomorrow ? '🌤 気象庁で明日の天気予報を見る' : '🌤 気象庁で今日の天気予報を見る';
+            const isWeekly = (call.args?.date === 'weekly');
+            const weatherLabel = isWeekly ? '📅 気象庁の週間天気予報を見る'
+              : isTomorrow ? '🌤 気象庁で明日の天気予報を見る' : '🌤 気象庁で今日の天気予報を見る';
             pendingLinks.push({
               text: weatherLabel,
               url: wxResult.blobUrl,
