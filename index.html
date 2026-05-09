@@ -1570,7 +1570,7 @@ async function fetchWeather(location, date = 'today') {
   // --- 結果組み立て ---
   const cond = date === 'tomorrow' ? tomorrowWx : todayWx;
   const tmax = date === 'tomorrow' ? tomorrowTmax : todayTmax;
-  const tmin = date === 'tomorrow' ? tomorrowTmin : todayTmin;
+  const tmin = date === 'tomorrow' ? tomorrowTmin : '--'; // 今日の最低気温はJMAデータが不安定なため非表示
   const rain = date === 'tomorrow' ? tomorrowRain : todayRain;
   // 実際の月日をラベルに含める（Geminiが正しい日付を言えるよう、月日を先頭に置く）
   const targetDate = date === 'tomorrow'
