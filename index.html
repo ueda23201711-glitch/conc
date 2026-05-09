@@ -1775,7 +1775,7 @@ function flushMicChunks() {
   // AI発話中はRMS音量を計測してエコーか実発話かを判定
   if (aiTalking) {
     const rms = Math.sqrt(merged.reduce((s, v) => s + v * v, 0) / merged.length) / 32768;
-    const BARGE_IN_THRESHOLD = 0.06;  // 0〜1スケール。エコー≈0.01〜0.03、肉声≈0.06〜
+    const BARGE_IN_THRESHOLD = 0.10;  // 0〜1スケール。エコー≈0.01〜0.05、肉声≈0.10〜
     if (rms < BARGE_IN_THRESHOLD) {
       micBuffer = [];  // エコー程度の音量 → 捨てる
       return;
