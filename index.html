@@ -389,6 +389,43 @@ function wxShort(text) {
   return t.slice(0, 8);
 }
 
+// 天気コードから短縮テキストを生成（jmaData[1]はweathersを持たないため）
+function wxCodeToShort(code) {
+  const c = typeof code === 'number' ? code : (parseInt(String(code)) || 0);
+  if (!c) return '';
+  const h = Math.floor(c / 100);
+  if (h === 1) {
+    if ([108,119,123,125,140].includes(c)) return '晴れ雷雨';
+    if ([102,103,106,107,112,113,114,118,120,121,122,126,127,128].includes(c)) return '晴時々雨';
+    if ([104,105,115,116,117,160,170,181].includes(c)) return '晴時々雪';
+    if ([101,110,111,130,131,132].includes(c)) return '晴時々曇';
+    return '晴れ';
+  }
+  if (h === 2) {
+    if ([208,219,240].includes(c)) return '曇り雷雨';
+    if ([202,203,206,207,212,213,214,218,220,221,222,224,225,226].includes(c)) return '曇時々雨';
+    if ([204,205,215,216,217,228,229,230,250,260,270,281].includes(c)) return '曇時々雪';
+    if ([201,210,211,223].includes(c)) return '曇時々晴';
+    if ([209,231].includes(c)) return '霧';
+    return '曇り';
+  }
+  if (h === 3) {
+    if ([350].includes(c)) return '雷雨';
+    if ([303,304,309,314,315,322,326,327,329,340,361,371].includes(c)) return '雨時々雪';
+    if ([301,311,316,320,321,323,324,325].includes(c)) return '雨時々晴';
+    if ([306,308].includes(c)) return '大雨';
+    return '雨';
+  }
+  if (h === 4) {
+    if ([407,408].includes(c)) return '暴風雪';
+    if ([403,409,414,422,423,426,427].includes(c)) return '雪時々雨';
+    if ([401].includes(c)) return '雪時々晴';
+    if ([405,406].includes(c)) return '大雪';
+    return '雪';
+  }
+  return '';
+}
+
 // 曜日
 function weekday(dateStr) {
   const d = new Date(dateStr + 'T00:00:00+09:00');
@@ -431,7 +468,8 @@ function openWeatherPanel(wd) {
     const tmin   = (d.tmin !== '--' && d.tmin) ? d.tmin : (isToday ? '--' : '--'); // 今日の最低気温はなし
     const pop    = (d.pop  !== '--' && d.pop ) ? d.pop  : (isToday ? wd.today.pop  : '--');
     const em = wxEmoji(wxCode, wx);
-    const sh = wxShort(wx);
+    // テキストがない場合はコードから短縮表示を生成（週間予報はweathersなしが多い）
+    const sh = wxShort(wx) || wxCodeToShort(wxCode);
     const mm = d.date.slice(5,7).replace(/^0/,'');
     const dd2 = d.date.slice(8,10).replace(/^0/,'');
     const wd2 = _wday(d.date);
@@ -1839,42 +1877,68 @@ async function fetchWeather(location, date = 'today') {
   const _weekly = [];
   try {
     const _wkTs = jmaData[1]?.timeSeries || [];
+
+    // weatherCodes を持つ area を全 areas から探す
     const _wxSer = _wkTs[0];
     const _wxDefs = _wxSer?.timeDefines || [];
-    const _wxAr   = _wxSer?.areas?.[0];
-    // 気温 series を探す（tempsMax/tempsMin を持つもの）
-    let _tSer = null;
-    for (const _s of _wkTs) { if (_s.areas?.[0]?.tempsMax) { _tSer = _s; break; } }
+    let _wxAr = null;
+    for (const _a of (_wxSer?.areas || [])) {
+      if (_a.weatherCodes?.length > 0) { _wxAr = _a; break; }
+    }
+    console.info('[weather] weekly wxAr:', _wxAr?.area?.name, 'codes:', _wxAr?.weatherCodes?.slice(0,3));
+
+    // tempsMax を持つ series/area を探す
+    let _tSer = null, _tAr = null;
+    for (const _s of _wkTs) {
+      for (const _a of (_s.areas || [])) {
+        if (_a.tempsMax?.length > 0) { _tSer = _s; _tAr = _a; break; }
+      }
+      if (_tAr) break;
+    }
     const _tDefs = _tSer?.timeDefines || [];
-    const _tAr   = _tSer?.areas?.[0];
-    // 降水確率 series（pops を持つもの）
-    let _pSer = null;
-    for (const _s of _wkTs) { if (_s.areas?.[0]?.pops) { _pSer = _s; break; } }
+
+    // pops を持つ series/area を探す
+    let _pSer = null, _pAr = null;
+    for (const _s of _wkTs) {
+      for (const _a of (_s.areas || [])) {
+        if (_a.pops?.length > 0) { _pSer = _s; _pAr = _a; break; }
+      }
+      if (_pAr) break;
+    }
     const _pDefs = _pSer?.timeDefines || [];
-    const _pAr   = _pSer?.areas?.[0];
+    console.info('[weather] weekly tDefs:', _tDefs.slice(0,3), 'pDefs:', _pDefs.slice(0,3));
 
     _wxDefs.forEach((_dt, _i) => {
       const _day = _dt.slice(0,10);
-      const _wxTxt = (_wxAr?.weathers?.[_i] || '').replace(/\s+/g,'');
-      const _wxCd  = _wxAr?.weatherCodes?.[_i] || '';
+      const _wxCd  = _wxAr?.weatherCodes?.[_i] ?? '';
+      // jmaData[1] の週間予報は weathers(テキスト)を持たないケースが多い
+      const _wxTxt = (_wxAr?.weathers?.[_i] || '').replace(/[\s　]+/g,'');
       const _tIdx  = _tDefs.findIndex(_d => _d.slice(0,10) === _day);
       const _pIdx  = _pDefs.findIndex(_d => _d.slice(0,10) === _day);
       _weekly.push({
         date: _day,
         wx: _wxTxt, wxCode: _wxCd,
-        tmax: _tIdx>=0 ? (_tAr?.tempsMax?.[_tIdx] ?? '--') : '--',
-        tmin: _tIdx>=0 ? (_tAr?.tempsMin?.[_tIdx] ?? '--') : '--',
-        pop:  _pIdx>=0 ? (_pAr?.pops?.[_pIdx] ?? '--') : '--',
+        tmax: _tIdx>=0 ? (String(_tAr?.tempsMax?.[_tIdx] ?? '--')) : '--',
+        tmin: _tIdx>=0 ? (String(_tAr?.tempsMin?.[_tIdx] ?? '--')) : '--',
+        pop:  _pIdx>=0 ? (String(_pAr?.pops?.[_pIdx] ?? '--')) : '--',
       });
     });
+    console.info('[weather] weekly days:', _weekly.length, _weekly.map(d=>d.date+':'+d.wxCode));
   } catch(_e) { console.warn('[weather] weekly extract error:', _e); }
+
+  // 今日・明日は jmaData[0] 由来のデータで先頭に確実に入れる（重複除外）
+  const _weeklyFinal = [
+    { ..._todayCard, tmin: '--' },  // 今日: 最低気温はなし
+    _tomCard,
+    ..._weekly.filter(_d => _d.date !== _todayStr2 && _d.date !== _tomStr2),
+  ];
 
   const weatherData = {
     areaName: areaName_pre,
     jmaUrl: jmaPageUrl,
     today: _todayCard,
     tomorrow: _tomCard,
-    weekly: _weekly,
+    weekly: _weeklyFinal,
   };
 
   return { text, blobUrl: jmaPageUrl, weatherData };
