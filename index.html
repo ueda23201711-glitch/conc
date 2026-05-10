@@ -303,53 +303,54 @@ function escHtml(s) {
 
 // 天気コード → 絵文字（JMA weatherCode 基準）
 function wxEmoji(code, text) {
-  const c = parseInt(code) || 0;
+  // コードは数値・文字列どちらでも対応
+  const c = typeof code === 'number' ? code : (parseInt(String(code)) || 0);
   // 全角スペース除去 & ひらがな天気語→漢字に正規化
   const t = (text || '')
-    .replace(/[\s\u3000]+/g, '')
+    .replace(/[\s　 ]+/g, '')
     .replace(/くもり/g, '曇').replace(/はれ/g, '晴')
-    .replace(/あめ/g, '雨').replace(/ゆき/g, '雪');
+    .replace(/あめ/g, '雨').replace(/ゆき/g, '雪')
+    .replace(/かみなり/g, '雷').replace(/みぞれ/g, '霙');
 
-  // ── コードベース判定（テキスト内容に依存しない）──
+  // ── コードベース判定（テキスト不要・100番台以上なら必ずここで決定）──
   if (c >= 100) {
-    const h = Math.floor(c / 100); // 1=晴系 2=曇系 3=雨系 4=雪系
-    if (c === 407 || c === 408) return '🌀'; // 暴風雪
-    if (c === 306 || c === 308) return '🌀'; // 暴風雨
-    if (c === 350 || c === 208 || c === 219 || c === 240) return '⛈'; // 雷雨
-    if (h === 4) { // 雪系
+    const h = Math.floor(c / 100);
+    if (c===407||c===408) return '🌀';
+    if (c===306||c===308) return '🌀';
+    if (c===350||c===208||c===219||c===240||c===123||c===125) return '⛈';
+    if (h === 4) {
       if ([403,409,414,422,423,426,427].includes(c)) return '🌨';
       return '❄️';
     }
-    if (h === 3) { // 雨系
+    if (h === 3) {
       if ([303,304,309,314,315,322,326,327,329,340,361,371].includes(c)) return '🌨';
       if ([301,311,316,320,321,323,324,325].includes(c)) return '🌦';
       return '🌧';
     }
-    if (h === 2) { // 曇り系
+    if (h === 2) {
       if ([209,231].includes(c)) return '🌫';
       if ([201,210,211,223].includes(c)) return '⛅';
       if ([202,203,206,207,212,213,214,218,220,221,222,224,225,226].includes(c)) return '🌦';
       if ([204,205,215,216,217,228,229,230,250,260,270,281].includes(c)) return '🌨';
       return '☁️';
     }
-    if (h === 1) { // 晴れ系
-      if ([108,119,123,125,140].includes(c)) return '⛈';
-      if ([102,103,106,107,112,113,114,118,120,121,122,126,127,128].includes(c)) return '🌦';
-      if ([104,105,115,116,117,160,170,181].includes(c)) return '🌨';
-      if ([101,110,111,130,131,132].includes(c)) return '⛅';
-      return '☀️';
-    }
+    // h === 1（晴れ系）
+    if ([108,119,140].includes(c)) return '⛈';
+    if ([102,103,106,107,112,113,114,118,120,121,122,126,127,128].includes(c)) return '🌦';
+    if ([104,105,115,116,117,160,170,181].includes(c)) return '🌨';
+    if ([101,110,111,130,131,132].includes(c)) return '⛅';
+    return '☀️';
   }
 
   // ── テキストベース判定（コードなし時）──
-  if (!t || t === '不明') return '🌡';
-  if (t.includes('暴風') || t.includes('台風')) return '🌀';
+  if (!t || t==='不明') return '🌡';
+  if (t.includes('暴風')||t.includes('台風')) return '🌀';
   if (t.includes('雷')) return '⛈';
-  if ((t.includes('雪') || t.includes('みぞれ')) && t.includes('雨')) return '🌨';
-  if (t.includes('雪') || t.includes('みぞれ')) return '❄️';
-  if (t.includes('雨') && (t.includes('晴') || t.includes('曇'))) return '🌦';
+  if ((t.includes('雪')||t.includes('霙'))&&t.includes('雨')) return '🌨';
+  if (t.includes('雪')||t.includes('霙')) return '❄️';
+  if (t.includes('雨')&&(t.includes('晴')||t.includes('曇'))) return '🌦';
   if (t.includes('雨')) return '🌧';
-  if (t.includes('曇') && t.includes('晴')) return '⛅';
+  if (t.includes('曇')&&t.includes('晴')) return '⛅';
   if (t.includes('曇')) return '☁️';
   if (t.includes('晴')) return '☀️';
   if (t.includes('霧')) return '🌫';
@@ -418,29 +419,39 @@ function openWeatherPanel(wd) {
     </div>`;
   };
 
+  const _days = ['日','月','火','水','木','金','土'];
+  const _wday = dateStr => _days[new Date(dateStr + 'T00:00:00+09:00').getDay()];
+
+  // 今日のデータはjmaData[1]の週間予報にnullが多いためjmaData[0]由来のwd.todayで補完
   const weekRows = (wd.weekly || []).map(d => {
-    const em = wxEmoji(d.wxCode, d.wx);
-    const sh = wxShort(d.wx);
+    const isToday = d.date === wd.today.date;
+    const wx     = d.wx    || (isToday ? wd.today.wx    : '');
+    const wxCode = d.wxCode|| (isToday ? wd.today.wxCode: '');
+    const tmax   = (d.tmax !== '--' && d.tmax) ? d.tmax : (isToday ? wd.today.tmax : '--');
+    const tmin   = (d.tmin !== '--' && d.tmin) ? d.tmin : (isToday ? '--' : '--'); // 今日の最低気温はなし
+    const pop    = (d.pop  !== '--' && d.pop ) ? d.pop  : (isToday ? wd.today.pop  : '--');
+    const em = wxEmoji(wxCode, wx);
+    const sh = wxShort(wx);
     const mm = d.date.slice(5,7).replace(/^0/,'');
-    const dd = d.date.slice(8,10).replace(/^0/,'');
-    const wd2 = weekday(d.date);
+    const dd2 = d.date.slice(8,10).replace(/^0/,'');
+    const wd2 = _wday(d.date);
     const sat = wd2==='土' ? ' sat' : '';
     const sun = wd2==='日' ? ' sun' : '';
     return `<tr>
-      <td class="wk-date${sat}${sun}">${mm}/${dd}<br><small>${wd2}</small></td>
+      <td class="wk-date${sat}${sun}">${mm}/${dd2}<br><small>${wd2}</small></td>
       <td class="wk-wx">${em}<br><small>${esc(sh)}</small></td>
-      <td class="wk-tmp">${d.tmax!=='--'?'<span class="tmax">↑'+esc(d.tmax)+'°</span>':''}<br>${d.tmin!=='--'?'<span class="tmin">↓'+esc(d.tmin)+'°</span>':''}</td>
-      <td class="wk-pop">${d.pop!=='--'?esc(d.pop)+'%':'–'}</td>
+      <td class="wk-tmp">${tmax!=='--'?'<span class="tmax">↑'+esc(tmax)+'°</span>':''}<br>${tmin!=='--'?'<span class="tmin">↓'+esc(tmin)+'°</span>':''}</td>
+      <td class="wk-pop">${pop!=='--'?esc(pop)+'%':'–'}</td>
     </tr>`;
   }).join('');
 
   const todayLabel = (() => {
     const d = new Date(wd.today.date + 'T00:00:00+09:00');
-    return `今日（${d.getMonth()+1}/${d.getDate()}）`;
+    return `今日（${d.getMonth()+1}/${d.getDate()}・${_days[d.getDay()]}）`;
   })();
   const tomorrowLabel = (() => {
     const d = new Date(wd.tomorrow.date + 'T00:00:00+09:00');
-    return `明日（${d.getMonth()+1}/${d.getDate()}）`;
+    return `明日（${d.getMonth()+1}/${d.getDate()}・${_days[d.getDay()]}）`;
   })();
 
   const html = `<!DOCTYPE html>
