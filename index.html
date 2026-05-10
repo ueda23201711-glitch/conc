@@ -360,7 +360,9 @@ function wxEmoji(code, text) {
 // 天気テキストを短縮表示用に変換（最大8文字）
 function wxShort(text) {
   if (!text) return '–';
-  const t = text.replace(/\s+/g, '').replace(/　/g,'');
+  const t = text.replace(/[\s　]+/g, '')
+    .replace(/くもり/g,'曇り').replace(/はれ/g,'晴れ')
+    .replace(/あめ/g,'雨').replace(/ゆき/g,'雪');
   // 特定パターンをまず置換
   const reps = [
     [/晴れのち(時々|一時)?曇り?/, '晴→曇'],
@@ -380,13 +382,17 @@ function wxShort(text) {
     [/雨時々(曇り?|晴れ?)/, '雨時々曇'],
     [/晴れ一時(曇り?|雨|雪)/, m => '晴一時'+m.replace(/晴れ一時/,'')],
     [/曇り?一時(晴れ?|雨|雪)/, m => '曇一時'+m.replace(/曇り?一時/,'')],
+    [/晴れ(昼前|昼頃|午前中|午後|夕方)から(時々|一時)?曇り?/, '晴れ→時々曇'],
+    [/晴れ(昼前|昼頃|午前中|午後|夕方)から(時々|一時)?雨/, '晴れ→時々雨'],
+    [/曇り?(昼前|昼頃|午前中|午後|夕方)から(時々|一時)?晴れ?/, '曇り→時々晴'],
+    [/曇り?(昼前|昼頃|午前中|午後|夕方)から(時々|一時)?雨/, '曇り→時々雨'],
   ];
   for (const [pat, rep] of reps) {
     const m = t.match(pat);
     if (m) return typeof rep === 'function' ? rep(m[0]) : rep;
   }
   // そのまま先頭8文字
-  return t.slice(0, 8);
+  return t.slice(0, 14); // JMA天気テキストは最大14文字程度
 }
 
 // 天気コードから短縮テキストを生成（jmaData[1]はweathersを持たないため）
@@ -442,7 +448,8 @@ function openWeatherPanel(wd) {
 
   const cardHtml = (label, d) => {
     const em = wxEmoji(d.wxCode, d.wx);
-    const wx = wxShort(d.wx);
+    // カードは全文表示（wxShort の8文字切り捨てを使わない）
+    const wx = (d.wx || '').replace(/[\s　]+/g,'').replace(/くもり/g,'曇').replace(/はれ/g,'晴') || (d.wxCode ? wxCodeToShort(d.wxCode) : '');
     const tempPart = d.tmax !== '--' && d.tmin !== '--'
       ? `<span class="tmax">最高${d.tmax}°</span> <span class="tmin">最低${d.tmin}°</span>`
       : d.tmax !== '--' ? `<span class="tmax">最高${d.tmax}°</span>`
