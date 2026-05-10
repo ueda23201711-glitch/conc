@@ -444,9 +444,9 @@ function openWeatherPanel(wd) {
     const em = wxEmoji(d.wxCode, d.wx);
     const wx = wxShort(d.wx);
     const tempPart = d.tmax !== '--' && d.tmin !== '--'
-      ? `<span class="tmax">↑${d.tmax}°</span> <span class="tmin">↓${d.tmin}°</span>`
-      : d.tmax !== '--' ? `<span class="tmax">↑${d.tmax}°</span>`
-      : d.tmin !== '--' ? `<span class="tmin">↓${d.tmin}°</span>` : '';
+      ? `<span class="tmax">最高${d.tmax}°</span> <span class="tmin">最低${d.tmin}°</span>`
+      : d.tmax !== '--' ? `<span class="tmax">最高${d.tmax}°</span>`
+      : d.tmin !== '--' ? `<span class="tmin">最低${d.tmin}°</span>` : '';
     const popPart = d.pop !== '--' ? `<span class="pop">☔${d.pop}%</span>` : '';
     return `<div class="card">
       <div class="card-label">${esc(label)}</div>
@@ -468,8 +468,8 @@ function openWeatherPanel(wd) {
     const tmin   = (d.tmin !== '--' && d.tmin) ? d.tmin : (isToday ? '--' : '--'); // 今日の最低気温はなし
     const pop    = (d.pop  !== '--' && d.pop ) ? d.pop  : (isToday ? wd.today.pop  : '--');
     const em = wxEmoji(wxCode, wx);
-    // テキストがない場合はコードから短縮表示を生成（週間予報はweathersなしが多い）
-    const sh = wxShort(wx) || wxCodeToShort(wxCode);
+    // wx が空の場合は wxShort をスキップして wxCodeToShort にフォールバック
+    const sh = (wx ? wxShort(wx) : '') || wxCodeToShort(wxCode) || '–';
     const mm = d.date.slice(5,7).replace(/^0/,'');
     const dd2 = d.date.slice(8,10).replace(/^0/,'');
     const wd2 = _wday(d.date);
@@ -478,7 +478,7 @@ function openWeatherPanel(wd) {
     return `<tr>
       <td class="wk-date${sat}${sun}">${mm}/${dd2}<br><small>${wd2}</small></td>
       <td class="wk-wx">${em}<br><small>${esc(sh)}</small></td>
-      <td class="wk-tmp">${tmax!=='--'?'<span class="tmax">↑'+esc(tmax)+'°</span>':''}<br>${tmin!=='--'?'<span class="tmin">↓'+esc(tmin)+'°</span>':''}</td>
+      <td class="wk-tmp">${tmax!=='--'?'<span class="tmax">最高'+esc(tmax)+'°</span>':''}<br>${tmin!=='--'?'<span class="tmin">最低'+esc(tmin)+'°</span>':''}</td>
       <td class="wk-pop">${pop!=='--'?esc(pop)+'%':'–'}</td>
     </tr>`;
   }).join('');
