@@ -329,7 +329,8 @@ function wxEmoji(code, text) {
     }
     if (h === 2) {
       if ([209,231].includes(c)) return '🌫';
-      if ([201,210,211,223].includes(c)) return '⛅';
+      if ([201,210,223].includes(c)) return '🌥';   // 曇り時々晴・曇りのち時々晴（曇り主体）
+      if ([211].includes(c)) return '⛅';              // 曇りのち晴れ（晴れへ移行）
       if ([202,203,206,207,212,213,214,218,220,221,222,224,225,226].includes(c)) return '🌦';
       if ([204,205,215,216,217,228,229,230,250,260,270,281].includes(c)) return '🌨';
       return '☁️';
@@ -338,7 +339,8 @@ function wxEmoji(code, text) {
     if ([108,119,140].includes(c)) return '⛈';
     if ([102,103,106,107,112,113,114,118,120,121,122,126,127,128].includes(c)) return '🌦';
     if ([104,105,115,116,117,160,170,181].includes(c)) return '🌨';
-    if ([101,110,111,130,131,132].includes(c)) return '⛅';
+    if ([101,130,131,132].includes(c)) return '🌤';  // 晴れ時々曇（晴れ主体・曇り間あり）
+    if ([110,111].includes(c)) return '⛅';           // 晴れのち曇（晴→曇の移行）
     return '☀️';
   }
 
@@ -350,7 +352,7 @@ function wxEmoji(code, text) {
   if (t.includes('雪')||t.includes('霙')) return '❄️';
   if (t.includes('雨')&&(t.includes('晴')||t.includes('曇'))) return '🌦';
   if (t.includes('雨')) return '🌧';
-  if (t.includes('曇')&&t.includes('晴')) return '⛅';
+  if (t.includes('晴')&&t.includes('曇')) return t.indexOf('晴') < t.indexOf('曇') ? '🌤' : '🌥';  // 晴主体→🌤、曇主体→🌥
   if (t.includes('曇')) return '☁️';
   if (t.includes('晴')) return '☀️';
   if (t.includes('霧')) return '🌫';
